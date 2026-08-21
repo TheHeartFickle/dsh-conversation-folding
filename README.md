@@ -31,7 +31,7 @@
 ### 通过 npm / DSH CLI 安装
 
 ```sh
-dsh plugin --profile web add @theheartfickle/dsh-conversation-folding-plugin@latest
+dsh plugin --profile web add @the-heart-fickle/dsh-conversation-folding-plugin@latest
 ```
 
 ### 通过 plugin-registry 安装
@@ -39,7 +39,7 @@ dsh plugin --profile web add @theheartfickle/dsh-conversation-folding-plugin@lat
 ```sh
 npm run package:registry
 dsh registry install ./registry
-dsh registry enable theheartfickle/dsh-conversation-folding
+dsh registry enable the-heart-fickle/dsh-conversation-folding
 ```
 
 > `registry/` 是本地生成的安装暂存目录，不会提交到仓库。
@@ -59,7 +59,7 @@ dsh registry enable theheartfickle/dsh-conversation-folding
 
 ```yaml
 - id: conversation-folding
-  name: '@theheartfickle/dsh-conversation-folding-plugin'
+  name: '@the-heart-fickle/dsh-conversation-folding-plugin'
   config:
     foldMode: 'all'
     auxVisible:

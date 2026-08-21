@@ -1,5 +1,5 @@
 {
-  "id": "theheartfickle/dsh-conversation-folding",
+  "id": "the-heart-fickle/dsh-conversation-folding",
   "version": "0.1.0",
   "main": "./lib/index.js",
   "description": "DSH 对话流渲染增强插件：思维链默认展开为可滚动子框，连续 tool-call 步骤折叠成组。",

@@ -9,7 +9,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('package.json is a public scoped plugin package', async () => {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-  assert.equal(pkg.name, '@theheartfickle/dsh-conversation-folding-plugin');
+  assert.equal(pkg.name, '@the-heart-fickle/dsh-conversation-folding-plugin');
   assert.equal(pkg.private, undefined);
   assert.equal(pkg.main, 'lib/index.js');
   assert.equal(pkg.scripts['package:registry'], 'node scripts/package-registry.mjs');
@@ -17,7 +17,7 @@ test('package.json is a public scoped plugin package', async () => {
 
 test('dsh.plugin.json declares the registry manifest and client entry', async () => {
   const manifest = JSON.parse(await readFile(join(root, 'dsh.plugin.json'), 'utf8'));
-  assert.equal(manifest.id, 'theheartfickle/dsh-conversation-folding');
+  assert.equal(manifest.id, 'the-heart-fickle/dsh-conversation-folding');
   assert.equal(manifest.main, './lib/index.js');
   assert.equal(manifest.client.main, './lib/client.js');
   assert.ok(Array.isArray(manifest.contributes.tools));
@@ -27,7 +27,7 @@ test('dsh.plugin.json declares the registry manifest and client entry', async ()
 test('cordis.patch.yml mounts the plugin row with default foldMode and aux exceptions', async () => {
   const patch = await readFile(join(root, 'cordis.patch.yml'), 'utf8');
   assert.match(patch, /id: conversation-folding/);
-  assert.match(patch, /name: '@theheartfickle\/dsh-conversation-folding-plugin'/);
+  assert.match(patch, /name: '@the-heart-fickle\/dsh-conversation-folding-plugin'/);
   assert.match(patch, /foldMode: 'all'/);
   assert.match(patch, /auxVisible:/);
   assert.match(patch, /- context/);
@@ -36,7 +36,7 @@ test('cordis.patch.yml mounts the plugin row with default foldMode and aux excep
 
 test('client bundle registers the scoped module id', async () => {
   const client = await readFile(join(root, 'lib/client.js'), 'utf8');
-  assert.match(client, /id: "@theheartfickle\/dsh-conversation-folding-plugin"/);
+  assert.match(client, /id: "@the-heart-fickle\/dsh-conversation-folding-plugin"/);
 });
 
 test('plugin exports follow the Cordis plugin shape', () => {

@@ -12,7 +12,7 @@
 # profile 可用 auxVisible: [] 覆盖，把它们也全部隐藏。
 - insert:
     - id: conversation-folding
-      name: '@theheartfickle/dsh-conversation-folding-plugin'
+      name: '@the-heart-fickle/dsh-conversation-folding-plugin'
       config:
         foldMode: 'all'
         auxVisible:
