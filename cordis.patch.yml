@@ -1,0 +1,20 @@
+# 对话流渲染增强：思维链默认展开为可滚动子框 + 连续 tool-call 步骤折叠成组
+# （默认只显示最新一个）。纯 client UI 插件，host 半边只暴露 config API。通过
+# priority: -1 shadow conversation.chat.node 的 assistant-step / tool-call / context 等 key。
+#
+# foldMode 控制折叠行为：
+#   all      —— 用户输入到 LLM 输出整轮折叠（默认）
+#   toolcall —— 只折叠 thinking 之间的 tool call
+#   none     —— 关闭整轮折叠和 tool-call 分组，保留 thinking 增强样式
+#
+# auxVisible 是“折叠时仍显示”的辅助项例外列表；代码内部默认全部隐藏。
+# 插件默认把 context 注入和 skill 加载作为例外保留可见；
+# profile 可用 auxVisible: [] 覆盖，把它们也全部隐藏。
+- insert:
+    - id: conversation-folding
+      name: '@theheartfickle/dsh-conversation-folding-plugin'
+      config:
+        foldMode: 'all'
+        auxVisible:
+          - context
+          - skill
