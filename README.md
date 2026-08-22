@@ -20,8 +20,8 @@
   - 新的思维链出现时，只折叠紧邻的前一个，保持上下文连续。
 
 - **辅助项可见性可配置**
-  - 代码内部默认将上下文注入、skill 加载等辅助项全部隐藏。
-  - 插件默认配置把 `context` 和 `skill` 列为例外，因此安装后仍会显示。
+  - client 内部默认显示 `context` 和 `skill`（`auxVisible: ["context","skill"]`）。
+  - host 配置未提供 `auxVisible` 时同样返回这两个默认值。
   - 在 profile 中用 `auxVisible: []` 可覆盖为全部隐藏。
 
 ## 📦 安装
@@ -79,7 +79,8 @@ dsh registry enable the-heart-fickle/dsh-conversation-folding
 
 - `context`：上下文注入行；不在列表中时折叠状态下隐藏。
 - `skill`：skill 加载行；不在列表中时折叠状态下隐藏。
-- `auxVisible: []` 表示所有辅助项都隐藏（相当于之前的全隐藏行为）。
+- 未配置时默认值为 `["context", "skill"]`。
+- `auxVisible: []` 表示所有辅助项都隐藏。
 
 ## 🗂️ 效果示意
 

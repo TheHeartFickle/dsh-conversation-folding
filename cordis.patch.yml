@@ -7,9 +7,8 @@
 #   toolcall —— 只折叠 thinking 之间的 tool call
 #   none     —— 关闭整轮折叠和 tool-call 分组，保留 thinking 增强样式
 #
-# auxVisible 是“折叠时仍显示”的辅助项例外列表；代码内部默认全部隐藏。
-# 插件默认把 context 注入和 skill 加载作为例外保留可见；
-# profile 可用 auxVisible: [] 覆盖，把它们也全部隐藏。
+# auxVisible 是“折叠时仍显示”的辅助项例外列表；未配置时默认 [context, skill]。
+# profile 可用 auxVisible: [] 覆盖，把辅助项也全部隐藏。
 - insert:
     - id: conversation-folding
       name: '@the-heart-fickle/dsh-conversation-folding'
