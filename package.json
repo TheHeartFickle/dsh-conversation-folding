@@ -1,5 +1,5 @@
 {
-  "name": "@the-heart-fickle/dsh-conversation-folding-plugin",
+  "name": "@the-heart-fickle/dsh-conversation-folding",
   "version": "0.1.0",
   "description": "DSH plugin that bundles dsh-conversation-folding: enhanced conversation rendering with scrollable thinking boxes and grouped tool-call steps.",
   "type": "module",

@@ -31,7 +31,7 @@
 ### 通过 npm / DSH CLI 安装
 
 ```sh
-dsh plugin --profile web add @the-heart-fickle/dsh-conversation-folding-plugin@latest
+dsh plugin --profile web add @the-heart-fickle/dsh-conversation-folding@latest
 ```
 
 ### 通过 plugin-registry 安装
@@ -59,7 +59,7 @@ dsh registry enable the-heart-fickle/dsh-conversation-folding
 
 ```yaml
 - id: conversation-folding
-  name: '@the-heart-fickle/dsh-conversation-folding-plugin'
+  name: '@the-heart-fickle/dsh-conversation-folding'
   config:
     foldMode: 'all'
     auxVisible:
