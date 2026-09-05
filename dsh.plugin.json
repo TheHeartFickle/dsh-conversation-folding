@@ -4,7 +4,7 @@
   "main": "./lib/index.js",
   "description": "DSH 对话流渲染增强插件：思维链默认展开为可滚动子框，连续 tool-call 步骤折叠成组。",
   "engines": {
-    "dsh": ">=0.0.1"
+    "dsh": ">=0.1.2-rc.1"
   },
   "contributes": {
     "tools": [],

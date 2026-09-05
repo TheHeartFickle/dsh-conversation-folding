@@ -46,13 +46,31 @@ test('client bundle uses turn-tail closing as final正文, not any intermediate 
   assert.ok(!client.includes('hasTextOfTurn'));
 });
 
+test('client bundle reads conversation data via useChat (DSH 0.1.2 removed session.chat)', async () => {
+  const client = await readFile(join(root, 'lib/client.js'), 'utf8');
+  assert.match(client, /function chatOf\(props\)/);
+  assert.match(client, /props\.useChat/);
+  assert.ok(!client.includes('s.chat.order'), 'session snapshot no longer carries .chat');
+  assert.ok(!client.includes('s.chat.nodes'), 'session snapshot no longer carries .chat');
+});
+
+test('client bundle injects hooks.hostInfo (0.1.2 renamed hostDescription and allocates priority)', async () => {
+  const client = await readFile(join(root, 'lib/client.js'), 'utf8');
+  assert.match(client, /hooks: \{ hostInfo: hostInfo \}/);
+  assert.match(client, /remote\.\$host/);
+  assert.ok(!client.includes('hooks: { hostDescription'), 'connection.hostDescription was removed in 0.1.2');
+  // 官方 renderer 查找排除自身注册的 entry 组件，而不是已失效的 priority === 0 约定
+  assert.match(client, /e\.component !== ownEntries\.toolCall/);
+  assert.match(client, /e\.component !== ownComponent/);
+});
+
 test('plugin exports follow the Cordis plugin shape', () => {
   assert.equal(plugin.name, 'dsh-conversation-folding');
   assert.deepEqual(plugin.inject, ['webServer']);
   assert.equal(typeof plugin.apply, 'function');
 });
 
-test('apply registers a config API that returns foldMode and auxVisible', () => {
+test('apply registers a config API that returns foldMode and auxVisible', async () => {
   const routes = [];
   const ctx = {
     webServer: {
@@ -71,7 +89,7 @@ test('apply registers a config API that returns foldMode and auxVisible', () => 
     end(body) { this.body = body; },
   };
   const req = { method: 'GET', url: '/api/conversation-folding/config' };
-  routes[0].handler(req, res);
+  await routes[0].handler(req, res);
   assert.equal(res.status, 200);
   assert.deepEqual(JSON.parse(res.body), { ok: true, foldMode: 'toolcall', auxVisible: ['context'] });
 });

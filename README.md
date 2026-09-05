@@ -107,7 +107,23 @@ LLM 输出（原生正文样式）
 ## 🔧 环境要求
 
 - Node.js ≥ 20
-- DSH（DeepSeek Harness）
+- DSH ≥ 0.1.2-rc.1（client 半边依赖 0.1.2 的 `useChat` ChatSnapshot 与 `hostInfo` 注入）
+
+## 📡 通信架构（dsh-std 适配通道）
+
+本插件同时支持两条与 DSH 后端通信的通道，命令权威实现共用 `lib/commands.js`：
+
+- **官方通道**（默认安装方式）：经 `cordis.patch.yml` 装配 host 半边，
+  `/api/conversation-folding/config` 是标准命令的 HTTP 薄投影，`foldMode` /
+  `auxVisible` 来自 profile 配置。
+- **标准通道**：包根的 `dsh-plugin.json`（Community v0.15）声明 `facets.host.entry`
+  与 `contributes.commands`。profile 安装 `@dsh-std/adapter-dsh` 后，适配层会自动
+  发现并把 `config` 命令发布到 `commands.dsh/v1alpha1`；该通道不读取 profile
+  config，返回与官方默认一致的内置默认值。
+
+```sh
+dsh plugin --profile web add @dsh-std/adapter-dsh   # 启用标准通道
+```
 
 ## 许可证
 
