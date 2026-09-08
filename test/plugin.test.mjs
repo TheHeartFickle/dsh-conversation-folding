@@ -39,11 +39,16 @@ test('client bundle registers the scoped module id', async () => {
   assert.match(client, /id: "@the-heart-fickle\/dsh-conversation-folding"/);
 });
 
-test('client bundle uses turn-tail closing as final正文, not any intermediate text', async () => {
+test('client bundle keeps model/projection as pure testable core', async () => {
   const client = await readFile(join(root, 'lib/client.js'), 'utf8');
-  assert.ok(client.includes('function closingOfTurn'));
-  assert.ok(client.includes('function isClosingAssistantNode'));
-  assert.ok(!client.includes('hasTextOfTurn'));
+  // 轨迹模型 / 视图投影（架构范式 §4/§5）：边界条件只在模型里，不在视图补丁里
+  assert.ok(client.includes('function classifyNode'));
+  assert.ok(client.includes('function buildTimeline'));
+  assert.ok(client.includes('function projectView'));
+  assert.ok(client.includes('exports.__test'));
+  // 旧的分散判定应已消失：分段逻辑不得散落在视图组件内
+  assert.ok(!client.includes('function segmentsOfTurn'), '分段已统一进 buildTimeline');
+  assert.ok(!client.includes('function closingOfTurn'), '轮闭合判定已统一为 turn-tail 信号');
 });
 
 test('client bundle reads conversation data via useChat (DSH 0.1.2 removed session.chat)', async () => {
@@ -54,14 +59,14 @@ test('client bundle reads conversation data via useChat (DSH 0.1.2 removed sessi
   assert.ok(!client.includes('s.chat.nodes'), 'session snapshot no longer carries .chat');
 });
 
-test('client bundle injects hooks.hostInfo (0.1.2 renamed hostDescription and allocates priority)', async () => {
+test('client bundle shadows only assistant-step and turn-process with explicit priority', async () => {
   const client = await readFile(join(root, 'lib/client.js'), 'utf8');
-  assert.match(client, /hooks: \{ hostInfo: hostInfo \}/);
-  assert.match(client, /remote\.\$host/);
-  assert.ok(!client.includes('hooks: { hostDescription'), 'connection.hostDescription was removed in 0.1.2');
-  // 官方 renderer 查找排除自身注册的 entry 组件，而不是已失效的 priority === 0 约定
-  assert.match(client, /e\.component !== ownEntries\.toolCall/);
-  assert.match(client, /e\.component !== ownComponent/);
+  // 0.1.2 slots 选举制：同 key 必须显式更低 priority（BUGS.md B3）
+  assert.match(client, /key: "assistant-step", locale: "conversation", priority: -1/);
+  assert.match(client, /key: "turn-process", locale: "conversation", priority: -1/);
+  // 不 shadow tool-call / context：显隐由投影生成的动态 CSS 控制
+  assert.ok(!client.includes('key: "tool-call"'));
+  assert.ok(!client.includes('key: "context"'));
 });
 
 test('plugin exports follow the Cordis plugin shape', () => {

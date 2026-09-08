@@ -29,3 +29,4 @@ Thumbs.db
 
 # DSH plugin-registry staging (assembled by scripts/package-registry.mjs)
 registry/
+.work-process
