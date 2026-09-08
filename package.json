@@ -1,7 +1,7 @@
 {
   "name": "@the-heart-fickle/dsh-conversation-folding",
   "version": "0.1.0",
-  "description": "DSH plugin that bundles dsh-conversation-folding: enhanced conversation rendering with scrollable thinking boxes and grouped tool-call steps.",
+  "description": "DSH plugin that bundles dsh-conversation-folding: enhanced conversation rendering with scrollable thinking boxes and foldable process steps.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -18,7 +18,11 @@
     "LICENSE"
   ],
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
     "test": "node --test \"test/**/*.test.mjs\"",
+    "prepublishOnly": "npm run typecheck && npm test",
     "package:registry": "node scripts/package-registry.mjs"
   },
   "dsh": {
@@ -31,7 +35,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1"
+    "schemastery": "^3.18.0"
   },
   "license": "MIT",
   "publishConfig": {
@@ -51,5 +55,13 @@
     "conversation",
     "rendering",
     "deepseek-harness"
-  ]
+  ],
+  "devDependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.2-rc.1",
+    "@types/node": "^26.5.0",
+    "@types/react": "~18.3.1",
+    "esbuild": "^0.28.2",
+    "schemastery": "^3.18.0",
+    "typescript": "^5.9.3"
+  }
 }

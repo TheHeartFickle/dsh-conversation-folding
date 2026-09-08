@@ -20,29 +20,51 @@
   /投影里的显式规则（R/F/S 编号，见 §2），不是视图里的特判补丁。新增节点
   类型只在 `classifyNode` 分类表登记一个角色。
 
-实现分层（lib/client.js 自上而下）：配置/显示模式/展开状态三个 store →
-§4 轨迹模型（纯函数 `buildTimeline`）→ §5 视图投影（纯函数 `projectView`）→
-§6-§10 生效层（缓存订阅、单一样式写入器、视图组件、补点行为、装配）。
-模型与投影经 `exports.__test` 供 Node 单测加载真实 bundle 驱动（不渲染组件）。
+实现分层（src/client/）：state.ts（配置/显示模式/展开状态三个 store）→
+model.ts §4 轨迹模型（纯函数 `buildTimeline`）→ projection.ts §5 视图投影
+（纯函数 `projectView`）→ views.ts / think-box.ts / settings-ui.ts /
+autoload.ts 生效层（缓存订阅、单一样式写入器、视图组件、补点行为）与
+main.ts 装配。模型与投影经 `exports.__test` 供 Node 单测加载真实 bundle
+驱动（不渲染组件）。
 
-## 1. 折叠模式（foldMode）
+## 1. 配置（浏览器本地设置）
 
-| foldMode | 行为 |
-|---|---|
-| `all`（默认） | 插件接管过程折叠：reasoning + 非 skill tool-call 折叠进折叠栏，正文永不折叠 |
-| `toolcall` | 官方原生渲染（0.1.2 slots 选举制下不再做 toolcall 分组），仅保留 thinking 增强样式 |
-| `none` | 关闭折叠，仅保留 thinking 增强样式 |
+折叠行为只有一种：**整轮折叠**——reasoning + 非 skill tool-call 折叠进折叠栏，
+正文永不折叠。不再有 `foldMode` 三值（旧 `toolcall` / `none` 行为由「对话显示」
+选择 Normal / Compact 达成）；配置不经 profile / host 下发，host 侧无配置状态。
 
-**启用条件（新增「折叠」对话显示模式）**：DSH 官方「对话显示」下拉中新增第三项
-「折叠」；只有选中「折叠」时插件才接管过程折叠与 turn-process，官方
+**启用条件（「Fold」对话显示模式）**：DSH 官方「对话显示」下拉中新增第三项
+「Fold」；只有选中「Fold」时插件才接管过程折叠与 turn-process，官方
 `normal` / `compact` 两种模式完全不受影响。插件模式存于
 `localStorage["dsh-conversation-folding.displayMode"]`，选择后自动重载页面生效。
 
-`auxVisible` 辅助显示项：`skill`、`context` 可选在折叠态保持可见。
+**步骤类型开关（auxVisible）**：设置标签页「对话折叠」（`settings.section`，与
+通用设置 / 模型 / 插件同级）按固定类型清单（`AUX_TYPES` 匹配表，覆盖 DSH 全部
+官方工具注册名：bash/pwsh、think、read、write、edit、glob、grep、web、skill、
+subagent、job、goal、todo、ask、ralph、workflow、context、system-prompt）开关：
+`bash / think / glob / read / write / edit / context(上下文注入) / skill /
+system-prompt(系统提示词) / ask(提问) / todo(任务清单)`。开关含义为**是否折叠**：
+豁免表 `auxVisible` 中的类型不折叠（收起时仍显示），其余折叠；默认豁免
+`context / skill / system-prompt`。
 
-## 2. all 模式折叠语义（核心）
+**持久化**（借鉴 DSH-better-sidebar）：host 半边经官方 settings 服务注册本插件
+命名空间（`settings.register("dsh-conversation-folding", schema)`），配置落盘到
+`<harness home>/settings.yaml` 的 `dsh-conversation-folding:` 命名空间
+（`displayMode` / `auxVisible` 两字段），跨端/重载恢复。DSH 的 settings RPC 只对
+白名单命名空间开放，第三方命名空间须走插件自有路由：client 经
+`GET/POST /conversation-folding/config` 读写（POST 侧 host 校验），浏览器
+localStorage 不存任何配置；settings 服务未挂载时路由 503，client 回退内置默认值。
 
-规则编号与 lib/client.js §4/§5 内注释一致；机械化测试见 test/model.test.mjs。
+**匹配表（§1 AUX_TYPES）**：豁免键 → 节点匹配规则。工具调用的实际名称是 host
+工具注册表的字面注册名（tool/call 事件 `data.name`；节点在 `data.root.name`），
+上游无别名解析，故 `names` 匹配 = 小写归一 + 精确相等；`kinds` 按节点 kind
+匹配（context / system-prompt，classifyNode 归为 aux，与 context 同路径）；
+`process` 匹配仅推理过程步（think，插件渲染，豁免时 React 侧保持显示）。
+未来新增、未列入匹配表的工具类型始终折叠（表内加一行即开放开关）。
+
+## 2. 折叠语义（核心）
+
+规则编号与 src/client/model.ts（§4）/ projection.ts（§5）内注释一致；机械化测试见 test/model.test.mjs。
 
 ### 2.1 轨迹模型与段（R 规则）
 
@@ -114,7 +136,7 @@
   `assistant-step` 与 `turn-process`（显式 priority: -1，见 §4），不影子
   tool-call / context。
 - tool-call / context 由官方渲染，显隐由投影生成的动态 CSS 完成（F2/F3/F4）。
-- 官方 compact 视图（turn-process 系统）在 all 模式下由插件接管：静态 unhide
+- 官方 compact 视图（turn-process 系统）在「Fold」显示模式下由插件接管：静态 unhide
   规则抵消 `hidden="until-found"` 的隐藏。`transcriptView=normal` 与 `compact`
   两种设置下行为一致。
 

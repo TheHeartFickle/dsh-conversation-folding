@@ -7,20 +7,5 @@
   "license": "MIT",
   "source": {
     "repository": "https://github.com/TheHeartFickle/dsh-conversation-folding"
-  },
-  "facets": {
-    "host": {
-      "entry": "./lib/std-host.js",
-      "apiVersion": "v1alpha1"
-    }
-  },
-  "contributes": {
-    "commands": [
-      {
-        "id": "the-heart-fickle.dsh-conversation-folding.config",
-        "title": "Conversation folding config",
-        "description": "Return the active foldMode and auxVisible settings as JSON"
-      }
-    ]
   }
 }

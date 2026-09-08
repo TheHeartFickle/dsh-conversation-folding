@@ -9,7 +9,7 @@
 ## 执行基线
 
 - 安装本插件后重启 `dsh web` 并刷新浏览器（改动 client.js 后必须重启，composition 缓存会掩盖问题；若页面经 HMR 多次热更，先整页刷新再测）。
-- 除注明外，全部条目在「折叠」显示模式下执行。
+- 除注明外，全部条目在「Fold」显示模式下执行。
 - 会话样本须包含：多段正文、多工具调用、思维链、被中止/中断的轮、Ctrl+Enter 插入的消息。
 - 浏览器条目判定以实际操作 + DOM 断言/截图为准。
 - 全局失败条件：`document.querySelectorAll('[data-slot-error]').length !== 0`，或页面存在 `data-dsh-debug-error` / `window.__DF_*` 调试探针。
@@ -118,13 +118,23 @@
 
 ## F 配置兼容
 
-### T-F1 foldMode 三值
-- 分别配置 `all` / `toolcall` / `none`。
-- 预期：`all` 接管过程折叠；`toolcall` 官方渲染 tool call、仅保留 thinking 增强；`none` 关闭折叠；三者仅在「折叠」显示模式下生效。（⬜ 待执行）
+### T-F1 设置标签页与配置入口
+- 打开设置：导航栏出现独立标签页「对话折叠」（与 通用设置 / 模型 / 插件 同级，
+  `settings.section`）；通用设置的「对话显示」行仍只有 Normal / Compact / 折叠
+  三项下拉（第三项名为 `Fold`）。
+- 预期：「对话折叠」页出现 18 行类型开关（覆盖 DSH 全部官方工具注册名 + think /
+  上下文注入 / 系统提示词）；切换立即生效（无需重载）；重启 `dsh web` 后保持；
+  `~/.dsh/settings.yaml` 出现 `dsh-conversation-folding:` 命名空间
+  （`displayMode` / `auxVisible` 与开关一致）；浏览器 localStorage 无本插件任何
+  配置键；配置读写走本插件自有路由 `GET/POST /conversation-folding/config`
+  （host 经 settings 服务落盘），不存在任何 profile 配置入口。（⬜ 待执行）
 
-### T-F2 auxVisible（M + B ✅）
-- 分别配置 `[]`、`["skill"]`、`["context"]`、不配置。
-- 预期：折叠态下未列入的辅助项（skill/context 行）隐藏，列入的可见；不配置时使用 host 默认（context/skill 可见）。
+### T-F2 按类型折叠开关（M ✅，B ⬜ 待执行）
+- 分别开关各类型（机械化用例：model.test.mjs「F2」系列 + §1 匹配表用例）。
+- 预期：开关 = 是否折叠（开 = 折叠进栏、收起隐藏；关 = 始终显示）；默认豁免
+  context / skill / system-prompt；工具名经匹配表精确匹配（pwsh→bash、
+  str_replace_editor→edit、todo_write→todo、ask_user_question→ask，大小写归一）；
+  未列入匹配表的工具类型（如 grep、subagent）始终折叠。
 
 ### T-F3 非 fold 显示模式隔离
 - 在 Normal / Compact 下检查。

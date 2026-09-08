@@ -162,6 +162,111 @@ test('F2 辅助项 auxVisible 豁免：context/skill 默认隐藏，配置后可
   assert.ok(proj_text_has_key(shown, 't1'), '普通 tool-call 不受豁免影响');
 });
 
+test('F2 任意 tool-call 类型可豁免：设置 bash 折叠时显示（M）', () => {
+  resetSeq();
+  const nodes = [user('u1', 1), toolCall('t1', 1, 'bash'), toolCall('t2', 1, 'bash'), turnTail('tt1', 1)];
+  const folded = project(nodes);
+  assert.ok(proj_text_has_key(folded, 't1'), '默认 bash 折叠（进隐藏样式）');
+  assert.ok(proj_text_has_key(folded, 't2'));
+  const shown = project(nodes, { auxVisible: (key) => key === 'bash' });
+  assert.ok(!proj_text_has_key(shown, 't1'), '豁免后 bash 不进隐藏样式');
+  assert.ok(!proj_text_has_key(shown, 't2'));
+});
+
+test('§1 别名匹配：工具注册名 → 固定类型 key（M）', () => {
+  resetSeq();
+  const { auxKeyOfNode } = client.__test;
+  // 同类工具/变体归入同一类型
+  assert.equal(auxKeyOfNode(toolCall('a', 1, 'pwsh')), 'bash', 'pwsh 归入 bash/Shell');
+  assert.equal(auxKeyOfNode(toolCall('b', 1, 'str_replace_editor')), 'edit');
+  assert.equal(auxKeyOfNode(toolCall('c', 1, 'multi-edit')), 'edit');
+  assert.equal(auxKeyOfNode(toolCall('d', 1, 'read_image')), 'read');
+  assert.equal(auxKeyOfNode(toolCall('e', 1, 'todo_write')), 'todo');
+  assert.equal(auxKeyOfNode(toolCall('f', 1, 'ask_user_question')), 'ask');
+  assert.equal(auxKeyOfNode(toolCall('g', 1, 'TODO_WRITE')), 'todo', '大小写归一');
+  // 其余官方工具类型各有开关
+  assert.equal(auxKeyOfNode(toolCall('h', 1, 'grep')), 'grep');
+  assert.equal(auxKeyOfNode(toolCall('i', 1, 'subagent')), 'subagent');
+  assert.equal(auxKeyOfNode(toolCall('j', 1, 'list_agents')), 'subagent');
+  assert.equal(auxKeyOfNode(toolCall('k', 1, 'web_search')), 'web');
+  assert.equal(auxKeyOfNode(toolCall('l', 1, 'job_output')), 'job');
+  assert.equal(auxKeyOfNode(toolCall('m', 1, 'create_goal')), 'goal');
+  // 未列入匹配表的工具类型（未来新增）→ undefined（始终折叠，无开关）
+  assert.equal(auxKeyOfNode(toolCall('n', 1, 'mcp_some_future_tool')), undefined);
+  // 非过程/工具节点
+  assert.equal(auxKeyOfNode(step('o', 1, TEXT_ONLY)), undefined, '正文步不是 think');
+  assert.equal(auxKeyOfNode(context('p', 1)), 'context');
+});
+
+test('§1 配置持久化：GET 恢复 + 开关写入 host 设置（M）', async () => {
+  resetSeq();
+  // 真实 bundle 经 apply(ctx)：GET /conversation-folding/config 恢复配置，
+  // 开关变更 POST 回 host（host 半边经官方 settings 服务落盘 settings.yaml）。
+  const state = { displayMode: 'fold', auxVisible: ['bash'] };
+  const posts = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, options) => {
+    if (url === '/conversation-folding/config' && options === undefined) {
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, ...state }) });
+    }
+    if (url === '/conversation-folding/config' && options && options.method === 'POST') {
+      const body = JSON.parse(options.body);
+      posts.push(body);
+      Object.assign(state, body);
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, ...state }) });
+    }
+    return Promise.resolve({ ok: false, json: async () => ({ ok: false }) });
+  };
+  try {
+    const injects = [];
+    const ctx = {
+      get: (name) => (name === 'slots' ? {
+        inject: (slot, factory) => injects.push([slot, factory()]),
+        register: (meta, component) => ({ meta, component }),
+      } : undefined),
+      effect: () => () => { },
+    };
+    client.apply(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(client.__test.getAuxVisible(), ['bash'], 'GET 恢复豁免表');
+    assert.equal(client.__test.getTranscriptMode(), 'fold', 'GET 恢复显示模式');
+    assert.ok(injects.some(([slot]) => slot === 'settings.section'), '设置标签页已注册');
+    client.__test.toggleAux('todo');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(posts[0], { auxVisible: ['bash', 'todo'] }, '开关变更 POST 到 host');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('F2 think 开关：仅推理过程步可设为不折叠（M）', () => {
+  resetSeq();
+  const nodes = [user('u1', 1), toolCall('t1', 1), step('s1', 1, REASONING), turnTail('tt1', 1)];
+  const folded = project(nodes);
+  assert.equal(viewOf(folded, 's1').state, 'hidden', '默认 think 折叠');
+  const unfolded = project(nodes, { expanded: (key) => key === 't1:open' || key === undefined });
+  assert.equal(viewOf(unfolded, 's1').state, 'visible');
+  // think 不折叠：收起的段内思维链保持显示
+  const exempt = project(nodes, { auxVisible: (key) => key === 'think' });
+  assert.equal(viewOf(exempt, 's1').state, 'visible', '豁免 think 后过程步恒显示');
+  assert.ok(proj_text_has_key(exempt, 't1'), '普通 tool-call 仍折叠');
+});
+
+test('F2 system-prompt（系统提示词）与 context 同路径折叠（M）', () => {
+  resetSeq();
+  const sysPrompt = makeNode('system-prompt', 'sp1', 1, {});
+  const nodes = [sysPrompt, user('u1', 1), toolCall('t1', 1), turnTail('tt1', 1)];
+  assert.equal(client.__test.classifyNode(sysPrompt), 'aux', 'system-prompt 归为辅助项，与 context 同路径');
+  const timeline = buildTimeline(nodes.map((n) => n.key), makeStore(nodes));
+  assert.equal(timeline.segByKey['t1:open'].steps, 1);
+  assert.ok('sp1' in timeline.owner, 'system-prompt 进段参与折叠豁免');
+  // 未豁免 → 进隐藏样式（按节点 key，同 context 机制）；豁免 → 无规则
+  const folded = projectView(timeline, { active: true, auxVisible: () => false, isExpanded: () => false });
+  assert.ok(proj_text_has_key(folded, 'sp1'), '系统提示词默认豁免被关闭时按节点 key 折叠');
+  const shown = projectView(timeline, { active: true, auxVisible: (key) => key === 'system-prompt', isExpanded: () => false });
+  assert.ok(!proj_text_has_key(shown, 'sp1'), '豁免后不进隐藏样式');
+});
+
 test('S2 补点停止条件可读模型：segKey 跨翻页稳定、步骤数可查', () => {
   resetSeq();
   // 「加载更早」载入更早历史后，同一逻辑段的 segKey（= 边界正文键）不变。

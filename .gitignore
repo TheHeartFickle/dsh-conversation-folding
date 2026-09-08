@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+package-lock.json
 
 # Logs
 logs/
@@ -30,3 +31,5 @@ Thumbs.db
 # DSH plugin-registry staging (assembled by scripts/package-registry.mjs)
 registry/
 .work-process
+# Build output (generated from src/ by scripts/build.mjs)
+lib/
