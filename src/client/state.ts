@@ -51,24 +51,23 @@ export const AUX_TYPES: AuxType[] = [
 // DEFAULT_AUX_VISIBLE 保持一致（两个运行域无法共享代码，plugin.test 对账）。
 export const DEFAULT_AUX_VISIBLE = ["context", "skill", "system-prompt"];
 
-// 三个响应式 store（§1 豁免表 / §2 显示模式 / §3 段展开）共享的
-// version + listeners 样板；值与写入逻辑各自持有，bump 即广播。
-interface VersionedStore {
-	get(): number;
-	subscribe(fn: () => void): () => void;
-	bump(): void;
-}
-
-function makeVersioned(): VersionedStore {
+// ---------- 响应式 store（值 + version + listeners 一体） ----------
+// 三个 store（§1 豁免表 / §2 显示模式 / §3 段展开）共用：set 写值即广播
+// （version 递增，listeners 逐个通知）。值引用不比较——§3 的段展开依赖
+// 无条件广播，调用方需要"值未变不广播"时自行短路（见 setTranscriptMode）。
+function createStore<T>(initial: T) {
+	let value = initial;
 	let version = 0;
 	const listeners = new Set<() => void>();
 	return {
-		get: () => version,
-		subscribe(fn) {
+		get: () => value,
+		version: () => version,
+		subscribe(fn: () => void): () => void {
 			listeners.add(fn);
 			return () => listeners.delete(fn);
 		},
-		bump() {
+		set(next: T): void {
+			value = next;
 			version += 1;
 			listeners.forEach((fn) => fn());
 		}
@@ -76,8 +75,7 @@ function makeVersioned(): VersionedStore {
 }
 
 // ---------- §1 豁免表 store ----------
-const auxStore = makeVersioned();
-let auxVisibleList = DEFAULT_AUX_VISIBLE.slice();
+const auxStore = createStore<string[]>(DEFAULT_AUX_VISIBLE.slice());
 
 // 节点 → 豁免键（匹配表查询）；未命中返回 undefined。
 export function auxKeyOfNode(node: ChatNode | null | undefined): string | undefined {
@@ -87,53 +85,28 @@ export function auxKeyOfNode(node: ChatNode | null | undefined): string | undefi
 		if (typeof name !== "string") return undefined;
 		const lower = name.toLowerCase();
 		for (const rule of AUX_TYPES) {
-			if (rule.names !== undefined && rule.names.indexOf(lower) !== -1) return rule.key;
+			if (rule.names !== undefined && rule.names.includes(lower)) return rule.key;
 		}
 		return undefined;
 	}
 	for (const rule of AUX_TYPES) {
-		if (rule.kinds !== undefined && rule.kinds.indexOf(node.kind) !== -1) return rule.key;
+		if (rule.kinds !== undefined && rule.kinds.includes(node.kind)) return rule.key;
 		if (rule.process === true && node.kind === "assistant-step" && classifyNode(node) === "process") return rule.key;
 	}
 	return undefined;
 }
 
-export function getAuxVisible(): string[] {
-	return auxVisibleList;
-}
+export const getAuxVisible = auxStore.get;
+export const subscribeAux = auxStore.subscribe;
+export const getAuxVersion = auxStore.version;
 
 export function includesAux(key: string): boolean {
-	return auxVisibleList.indexOf(key) !== -1;
+	return auxStore.get().includes(key);
 }
-
-export const subscribeAux = auxStore.subscribe;
-export const getAuxVersion = auxStore.get;
 
 export function setAuxVisible(list: unknown): void {
 	if (!Array.isArray(list)) return;
-	const next = list.filter((item): item is string => typeof item === "string");
-	const changed = next.length !== auxVisibleList.length ||
-		next.some((value, index) => value !== auxVisibleList[index]);
-	if (!changed) return;
-	auxVisibleList = next;
-	auxStore.bump();
-}
-
-// 用户动作才落盘：POST 给 host 半边，由官方 settings 服务写入 settings.yaml。
-export function persistConfig(patch: Record<string, unknown>): void {
-	if (typeof fetch !== "function") return;
-	fetch("/conversation-folding/config", {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(patch)
-	}).catch(() => { });
-}
-
-export function toggleAux(kind: string): void {
-	setAuxVisible(includesAux(kind)
-		? auxVisibleList.filter((key) => key !== kind)
-		: auxVisibleList.concat([kind]));
-	persistConfig({ auxVisible: auxVisibleList.slice() });
+	auxStore.set(list.filter((item): item is string => typeof item === "string"));
 }
 
 interface ConfigPayload {
@@ -142,17 +115,37 @@ interface ConfigPayload {
 	auxVisible?: unknown;
 }
 
-// host 配置读写：GET /conversation-folding/config 恢复，POST 局部更新
-// （host 半边经官方 settings 服务持久化到 settings.yaml）。
+// host 配置读写共用一个端点：GET /conversation-folding/config 恢复，
+// POST 局部更新（host 半边经官方 settings 服务持久化到 settings.yaml）。
+// 网络/解析失败一律吞掉（返回 null）：配置恢复失败回退内置默认值。
+function fetchConfig(init?: RequestInit): Promise<ConfigPayload | null> {
+	return fetch("/conversation-folding/config", init)
+		.then((res) => (res.ok ? res.json() : null))
+		.catch(() => null);
+}
+
+// 用户动作才落盘：POST 给 host 半边，由官方 settings 服务写入 settings.yaml。
+export function persistConfig(patch: Record<string, unknown>): void {
+	void fetchConfig({
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(patch)
+	});
+}
+
 export function loadConfig(): void {
-	if (typeof fetch !== "function") return;
-	fetch("/conversation-folding/config").then((res) => {
-		return res.ok ? res.json() : null;
-	}).then((data: ConfigPayload | null) => {
+	fetchConfig().then((data) => {
 		if (!data || !data.ok) return;
 		if (data.displayMode !== undefined) setTranscriptMode(data.displayMode);
 		if (data.auxVisible !== undefined) setAuxVisible(data.auxVisible);
-	}).catch(() => { });
+	});
+}
+
+export function toggleAux(kind: string): void {
+	setAuxVisible(includesAux(kind)
+		? auxStore.get().filter((key) => key !== kind)
+		: auxStore.get().concat([kind]));
+	persistConfig({ auxVisible: auxStore.get().slice() });
 }
 
 // ---------- §2 对话显示模式 ----------
@@ -167,23 +160,19 @@ function isTranscriptMode(value: unknown): value is TranscriptMode {
 	return TRANSCRIPT_MODES.includes(value as TranscriptMode);
 }
 
-const modeStore = makeVersioned();
-let transcriptMode: TranscriptMode = "compact";
+const modeStore = createStore<TranscriptMode>("compact");
+export const subscribeTranscript = modeStore.subscribe;
+export const getTranscriptVersion = modeStore.version;
 
 export function getTranscriptMode(): TranscriptMode {
-	return transcriptMode;
+	return modeStore.get();
 }
-
-export const subscribeTranscript = modeStore.subscribe;
-export const getTranscriptVersion = modeStore.get;
 
 // 参数保持 unknown：GET 恢复的值未经校验，非法模式直接忽略（与原实现一致）。
 export function setTranscriptMode(mode: unknown): void {
-	if (!isTranscriptMode(mode)) return;
-	if (mode === transcriptMode) return;
-	transcriptMode = mode;
+	if (!isTranscriptMode(mode) || mode === modeStore.get()) return;
+	modeStore.set(mode);
 	syncFoldModeAttr(isFoldActive());
-	modeStore.bump();
 }
 
 export function isFoldActive(): boolean {
@@ -196,18 +185,18 @@ export function syncFoldModeAttr(active: boolean): void {
 
 // ---------- §3 段展开状态 ----------
 // 折叠单位是「段」（见 model.ts §4）；展开状态按段 segKey 共享。
-const segStore = makeVersioned();
-const segExpanded = new Map<string, boolean>();
-
+const segStore = createStore(new Map<string, boolean>());
 export const subscribeSeg = segStore.subscribe;
-export const getSegVersion = segStore.get;
+export const getSegVersion = segStore.version;
 
 export function isSegExpanded(key: string | undefined): boolean {
-	return key !== undefined && segExpanded.get(key) === true;
+	return key !== undefined && segStore.get().get(key) === true;
 }
 
 export function setSegExpanded(key: string | undefined, expanded: boolean): void {
 	if (key === undefined) return;
-	segExpanded.set(key, expanded);
-	segStore.bump();
+	// 不可变更新（拷贝后写）：store 靠 version 广播，不比较值引用。
+	const next = new Map(segStore.get());
+	next.set(key, expanded);
+	segStore.set(next);
 }

@@ -27,8 +27,7 @@ function findChatScroller(): HTMLElement | null {
 }
 
 // 联动：新的 running 思维链出现时，只折叠紧邻的前一个（更早的手动展开状态不动）。
-let thinkSeq = 0;
-let runningThink: { id: number; collapse: () => void } | null = null;
+let runningThink: { id: string; collapse: () => void } | null = null;
 
 export interface ThinkBoxProps {
 	text: string;
@@ -39,25 +38,15 @@ export interface ThinkBoxProps {
 export function ThinkBox(props: ThinkBoxProps): React.ReactElement {
 	const text = props.text;
 	const running = props.running;
-	const openState = React.useState(props.running === true || props.open === true);
-	const open = openState[0];
-	const setOpen = openState[1];
-	const idRef = React.useRef<number | null>(null);
-	if (idRef.current === null) {
-		thinkSeq += 1;
-		idRef.current = thinkSeq;
-	}
-	const myId = idRef.current;
-	const collapseRef = React.useRef<(() => void) | null>(null);
-	collapseRef.current = () => setOpen(false);
+	const [open, setOpen] = React.useState(props.running === true || props.open === true);
+	const myId = React.useId();
 	React.useEffect(() => {
-		if (running) {
-			setOpen(true);
-			if (runningThink !== null && runningThink.id !== myId) {
-				runningThink.collapse();
-			}
-			runningThink = { id: myId, collapse: collapseRef.current! };
+		if (!running) return;
+		setOpen(true);
+		if (runningThink !== null && runningThink.id !== myId) {
+			runningThink.collapse();
 		}
+		runningThink = { id: myId, collapse: () => setOpen(false) };
 	}, [running, myId]);
 	React.useEffect(() => {
 		return () => {

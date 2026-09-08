@@ -45,7 +45,7 @@ export interface ChatSnapshot {
 	nodes: { get(key: string): ChatNode | undefined };
 }
 
-/** 运行时守卫：getTimeline/getProjection 只对合法快照缓存。 */
+/** 运行时守卫：getProjection 只对合法快照缓存。 */
 export function isChatSnapshot(chat: unknown): chat is ChatSnapshot {
 	const value = chat as ChatSnapshot | null | undefined;
 	return value !== null && value !== undefined &&
@@ -61,10 +61,11 @@ export interface Segment {
 	hasReasoning: boolean;
 	latestKey: string | null;
 	startCtx: "user" | "body" | "steering";
+	// endType=body/boundary 时 segKey 即封口边界节点的 key（闭合段锚定信息
+	// 直接读 segKey，不设冗余的 boundaryKey 字段）；messages 同理，恒等于
+	// endType === "body" ? 1 : 0，由投影侧现算。
 	endType: "body" | "boundary" | "open";
-	boundaryKey: string | null;
 	prevBody: string | null;
-	messages: number;
 }
 
 export interface TurnModel {
@@ -77,18 +78,9 @@ export interface TurnModel {
 
 export interface Timeline {
 	turns: TurnModel[];
-	turnByKey: Record<string, TurnModel>;
-	owner: Record<string, string>;
 	bodySeg: Record<string, string | null>;
 	segByKey: Record<string, Segment>;
 	nodes: { get(key: string): ChatNode | undefined };
-}
-
-export function visibleBlocksOf(blocks: (ChatBlock | undefined)[] | null | undefined): ChatBlock[] {
-	if (!Array.isArray(blocks)) return [];
-	return blocks.filter((block): block is ChatBlock => {
-		return block !== undefined && block !== null && block.kind !== "reasoning" && block.kind !== "tool-call";
-	});
 }
 
 export function hasReasoning(node: ChatNode | null | undefined): boolean {
@@ -98,11 +90,7 @@ export function hasReasoning(node: ChatNode | null | undefined): boolean {
 }
 
 export function toolCallName(node: ChatNode | null | undefined): string | undefined {
-	const root = node && node.data && node.data.root;
-	if (!root) return undefined;
-	if (root.name) return root.name;
-	if (root.call && root.call.name) return root.call.name;
-	return undefined;
+	return node?.data?.root?.name || node?.data?.root?.call?.name;
 }
 
 export function isSkillToolCall(node: ChatNode | null | undefined): boolean {
@@ -115,7 +103,8 @@ export function classifyNode(node: ChatNode | null | undefined): NodeRole {
 	if (!node) return "skip";
 	if (node.kind === "user" || node.kind === "steering") return "boundary";
 	if (node.kind === "assistant-step") {
-		if (visibleBlocksOf(node.data && node.data.blocks).length > 0) return "body";
+		// 有可见 block（reasoning / tool-call 块不算可见内容）→ 正文
+		if (node.data?.blocks?.some((block) => block !== undefined && block !== null && block.kind !== "reasoning" && block.kind !== "tool-call")) return "body";
 		return hasReasoning(node) ? "process" : "empty-step";
 	}
 	if (node.kind === "tool-call") return isSkillToolCall(node) ? "aux" : "process";
@@ -137,9 +126,9 @@ export function turnOf(node: ChatNode): number | undefined {
 //   segKey 稳定格式：闭合段 = 段后边界节点的 key（正文或 steering 节点 key，
 //                   全局唯一，跨「加载更早」/重渲染稳定）；开放段（流式尾段）
 //                   = "t<turn>:open"，出现边界后自然换键为边界 key。
-//   owner       过程/辅助/空载节点 key → segKey
 //   bodySeg     正文节点 key → 其前一段 segKey（正文内思维链联动展开）
 //   segByKey    segKey → segment
+//   nodes       原样透传（投影/补点按 key 反查节点）
 // 规则（R，边界条件的全部清单）：
 //   R1 轨迹顺序：严格按 order 迭代，不重排。
 //   R2 边界封口：user/steering/正文 封口当前段并开启新段。
@@ -155,8 +144,7 @@ export function turnOf(node: ChatNode): number | undefined {
 //      把折叠栏落位到段首上方（B2）——栏不集中堆在轮顶，展开步骤在栏下方。
 export function buildTimeline(order: readonly string[], nodes: ChatSnapshot["nodes"]): Timeline {
 	const turns: TurnModel[] = [];
-	const turnByKey: Timeline["turnByKey"] = {};
-	const owner: Timeline["owner"] = {};
+	const turnByKey: Record<number, TurnModel> = {};
 	const bodySeg: Timeline["bodySeg"] = {};
 	const segByKey: Timeline["segByKey"] = {};
 	let model: TurnModel | null = null;
@@ -169,7 +157,7 @@ export function buildTimeline(order: readonly string[], nodes: ChatSnapshot["nod
 		return {
 			keys: [], steps: 0, toolCalls: 0, hasReasoning: false, latestKey: null,
 			startCtx: pendingCtx,
-			segKey: "", endType: "open", boundaryKey: null, prevBody: null, messages: 0
+			segKey: "", endType: "open", prevBody: null
 		};
 	}
 
@@ -177,19 +165,12 @@ export function buildTimeline(order: readonly string[], nodes: ChatSnapshot["nod
 		let seg = cur;
 		const keep = (seg !== null && seg.keys.length > 0) || (endType === "body" && bodyHasReasoning === true);
 		if (keep && model !== null) {
-			if (seg === null) {
-				seg = {
-					keys: [], steps: 0, toolCalls: 0, hasReasoning: false, latestKey: null,
-					startCtx: pendingCtx,
-					segKey: "", endType: "open", boundaryKey: null, prevBody: null, messages: 0
-				};
-			}
+			// 段未开（纯问答正文封空段）且正文带思维链时也落账（R4 例外）；
+			// openSeg() 的 startCtx=pendingCtx 与原内联字面量逐字段相同。
+			if (seg === null) seg = openSeg();
 			seg.endType = endType;
-			seg.boundaryKey = boundaryKey === undefined ? null : boundaryKey;
 			seg.prevBody = lastBody;
-			seg.messages = endType === "body" ? 1 : 0;
 			seg.segKey = endType === "open" ? "t" + model.turn + ":open" : String(boundaryKey);
-			for (const key of seg.keys) owner[key] = seg.segKey;
 			segByKey[seg.segKey] = seg;
 			model.segments.push(seg);
 		}
@@ -212,7 +193,8 @@ export function buildTimeline(order: readonly string[], nodes: ChatSnapshot["nod
 			if (cur !== null) closeSeg("open", undefined, false);
 			model = turnByKey[turn];
 			if (model === undefined) {
-				model = turnByKey[turn] = { turn: turn, closed: false, segments: [], bodies: [], processKey: undefined };
+				model = { turn: turn, closed: false, segments: [], bodies: [], processKey: undefined };
+				turnByKey[turn] = model;
 				turns.push(model);
 			}
 			lastBody = null;
@@ -244,5 +226,5 @@ export function buildTimeline(order: readonly string[], nodes: ChatSnapshot["nod
 		}
 	}
 	if (model !== null) closeSeg("open", undefined, false);
-	return { turns: turns, turnByKey: turnByKey, owner: owner, bodySeg: bodySeg, segByKey: segByKey, nodes: nodes };
+	return { turns: turns, bodySeg: bodySeg, segByKey: segByKey, nodes: nodes };
 }

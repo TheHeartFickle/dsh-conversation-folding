@@ -5,6 +5,7 @@
 // DSH 的 settings RPC 只对白名单命名空间开放，第三方命名空间必须走插件自有路由：
 // GET /conversation-folding/config 读，POST 写（写前 host 侧校验）。
 // settings 服务可选：未挂载时路由返回 503，client 回退内置默认值。
+import { text } from "node:stream/consumers";
 import z from "schemastery";
 
 const CONFIG_NS = "dsh-conversation-folding";
@@ -66,10 +67,10 @@ function apply(ctx: HostContext): void {
 		const read = (): PluginConfig => {
 			const info = sctx.settings.describe().find((c) => c.ns === CONFIG_NS);
 			const value: Partial<PluginConfig> = info && info.value ? info.value : {};
-			const mode = value.displayMode;
 			return {
-				// 非法/缺失 displayMode 回退 compact（原实现语义）
-				displayMode: mode !== undefined && mode !== null && DISPLAY_MODES.includes(mode as (typeof DISPLAY_MODES)[number]) ? mode : "compact",
+				// 非法/缺失 displayMode 回退 compact（原实现语义；find 不命中
+				// 覆盖 undefined/null/未知串）
+				displayMode: DISPLAY_MODES.find((mode) => mode === value.displayMode) ?? "compact",
 				auxVisible: Array.isArray(value.auxVisible) ? value.auxVisible : DEFAULT_AUX_VISIBLE.slice()
 			};
 		};
@@ -100,19 +101,16 @@ function apply(ctx: HostContext): void {
 			}
 			if (req.method === 'POST') {
 				if (api === null) { writeJson(res, 503, { ok: false, error: 'settings-unavailable' }); return; }
-				const chunks: Buffer[] = [];
-				for await (const chunk of req) {
-					chunks.push(chunk);
-				}
 				let patch: Record<string, unknown>;
 				try {
-					patch = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+					// 请求体读取失败（流中断）与 JSON 解析失败同归 400
+					patch = JSON.parse(await text(req));
 				} catch {
 					writeJson(res, 400, { ok: false, error: 'invalid-json' });
 					return;
 				}
 				if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) { writeJson(res, 400, { ok: false, error: 'invalid-patch' }); return; }
-				if (patch.displayMode !== undefined && DISPLAY_MODES.indexOf(patch.displayMode as (typeof DISPLAY_MODES)[number]) === -1) { writeJson(res, 400, { ok: false, error: 'invalid-displayMode' }); return; }
+				if (patch.displayMode !== undefined && !DISPLAY_MODES.includes(patch.displayMode as (typeof DISPLAY_MODES)[number])) { writeJson(res, 400, { ok: false, error: 'invalid-displayMode' }); return; }
 				if (patch.auxVisible !== undefined && !Array.isArray(patch.auxVisible)) { writeJson(res, 400, { ok: false, error: 'invalid-auxVisible' }); return; }
 				try {
 					const config = await api.update(patch);

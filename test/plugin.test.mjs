@@ -56,7 +56,7 @@ test('client bundle keeps model/projection as pure testable core', async () => {
 
 test('client bundle reads conversation data via useChat (DSH 0.1.2 removed session.chat)', async () => {
   const client = await readFile(join(root, 'lib/client.js'), 'utf8');
-  assert.match(client, /function chatOf\(props\)/);
+  assert.match(client, /function useProjection\(props\)/);
   assert.match(client, /props\.useChat/);
   assert.ok(!client.includes('s.chat.order'), 'session snapshot no longer carries .chat');
   assert.ok(!client.includes('s.chat.nodes'), 'session snapshot no longer carries .chat');

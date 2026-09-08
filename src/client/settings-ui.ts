@@ -17,9 +17,7 @@ export function TranscriptViewRowFold(props: TranscriptViewRowFoldProps): React.
 	const setTranscriptView = props.setTranscriptView;
 	const t = props.t;
 	const mode = getTranscriptMode();
-	const openState = React.useState(false);
-	const open = openState[0];
-	const setOpen = openState[1];
+	const [open, setOpen] = React.useState(false);
 	function labelOf(key: string, fallback: string): string {
 		const value = t ? t(key) : null;
 		return value && value !== key ? value : fallback;
@@ -29,20 +27,16 @@ export function TranscriptViewRowFold(props: TranscriptViewRowFoldProps): React.
 		{ id: "compact", label: labelOf("settings.transcript.compact", "紧凑") },
 		{ id: "fold", label: "Fold" }
 	];
-	let selected = options[0];
-	for (const option of options) {
-		if (option.id === mode) { selected = option; break; }
-	}
-	function closeMenu(): void { setOpen(false); }
+	const selected = options.find((option) => option.id === mode) ?? options[0];
 	function selectMode(id: string): void {
 		// normal/compact 保持官方原样：同步给官方；fold 只启用本插件，不改官方对话显示。
 		if (id !== "fold" && setTranscriptView) setTranscriptView(id);
-		const changed = id !== getTranscriptMode();
+		if (id === getTranscriptMode()) return;
 		setTranscriptMode(id);
-		if (changed) persistConfig({ displayMode: id });
+		persistConfig({ displayMode: id });
 		// 聊天视图对模式切换的响应式订阅在部分组件上没有即时重渲染，
 		// 选择模式后重载一次以保证生效（设置值已持久化）。
-		if (changed) setTimeout(() => { if (typeof location !== "undefined") location.reload(); }, 50);
+		setTimeout(() => { if (typeof location !== "undefined") location.reload(); }, 50);
 	}
 	const selector = React.createElement("button", {
 		type: "button",
@@ -58,12 +52,11 @@ export function TranscriptViewRowFold(props: TranscriptViewRowFoldProps): React.
 		),
 		React.createElement(Menu, {
 			open: open,
-			onClose: closeMenu,
-			items: options.map((option) => {
-				return { id: option.id, label: option.label };
-			}),
+			onClose: () => setOpen(false),
+			// options 本身就是 { id, label } 形状，无需逐字段拷贝
+			items: options,
 			selectedId: mode,
-			onSelect: (id: string) => { closeMenu(); selectMode(id); },
+			onSelect: (id: string) => { setOpen(false); selectMode(id); },
 			align: "end",
 			portal: true,
 			anchor: selector

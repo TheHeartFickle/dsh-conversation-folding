@@ -25,12 +25,10 @@ export interface ProjectUI {
 	isExpanded(segKey: string): boolean;
 }
 
-export type NodeViewState = "visible" | "preview" | "hidden";
-
 export interface NodeView {
 	role: "process" | "body" | "empty-step";
 	segKey: string | null;
-	state: NodeViewState;
+	visible: boolean;
 }
 
 export interface Projection {
@@ -44,14 +42,14 @@ export interface Projection {
 // projectView(timeline, ui) → Projection
 //   ui = { active, auxVisible(key)=>bool, isExpanded(segKey)=>bool }
 // 输出：
-//   views      Map 节点key → { role, segKey, state }
-//              state ∈ "visible" | "preview" | "hidden"
+//   views      Map 节点key → { role, segKey, visible }
+//              visible=false 为隐藏；流式开放段的预览键（F4）同为 visible。
 //   barsByAnchor Map 锚点节点key → [{ segKey, toolCalls, messages, pos }]
 //              pos="before" 栏在锚点内容上方；pos="after" 在下方。
 //   styleText  动态隐藏 CSS（tool-call / context 由官方渲染，只能用 CSS 过滤；
 //              assistant-step 座位由本插件渲染，走 React 分支）
 // 过滤规则（F，全部显式列出）：
-//   F1 正文永不隐藏（正文键不进入 views 的 hidden 态）。
+//   F1 正文永不隐藏（正文键不进入 views 的隐藏态）。
 //   F2 收起的闭合段：段内过程/辅助节点全部隐藏，类型是否豁免由
 //      auxVisible 决定（「对话折叠」设置页按固定类型清单开关；§1）。
 //   F3 收起的开放段且轮已闭合（中止/中断轮）：全部隐藏、无预览 —— 失败
@@ -66,13 +64,15 @@ export interface Projection {
 //      轮顶——B15；展开方向修正——B16）：栏渲染在其所折叠段的段首上方。
 //      收起时段内步骤隐藏，栏视觉上紧贴其后边界内容（每轮正文上方各自
 //      一栏）；展开 = [栏][步骤][正文]。落座规则见 barAnchorOf。
+function bodyAnchor(seg: Timeline["segByKey"][string]): BarAnchor | null {
+	// 思考正文段（无步骤）的兜底锚点：正文、正文上方（联动正文内思维链）。
+	// endType=body 时 segKey 即封口正文键（见 model.ts Segment 注释）。
+	return seg.endType === "body" ? { key: seg.segKey, pos: "before" } : null;
+}
+
 export function barAnchorOf(seg: Timeline["segByKey"][string], model: Timeline["turns"][number], nodes: ChatSnapshotNodes): BarAnchor | null {
 	// ① 无步骤的思考正文段：锚点=该正文、正文上方（联动正文内思维链）。
-	if (seg.keys.length === 0) {
-		return seg.endType === "body" && seg.boundaryKey
-			? { key: String(seg.boundaryKey), pos: "before" }
-			: null;
-	}
+	if (seg.keys.length === 0) return bodyAnchor(seg);
 	// ② 段直接跟在正文后：锚点=该正文、正文下方（= 段首上方）。
 	if (seg.startCtx === "body" && seg.prevBody) {
 		return { key: seg.prevBody, pos: "after" };
@@ -81,9 +81,7 @@ export function barAnchorOf(seg: Timeline["segByKey"][string], model: Timeline["
 	if (seg.startCtx !== "steering") {
 		if (model.processKey !== undefined) return { key: model.processKey, pos: "before" };
 		if (seg.prevBody) return { key: seg.prevBody, pos: "after" };
-		return seg.endType === "body" && seg.boundaryKey
-			? { key: String(seg.boundaryKey), pos: "before" }
-			: null;
+		return bodyAnchor(seg);
 	}
 	// ④ 段跟在 steering 后（已知妥协：官方 steering 座位不可注入）：
 	//    段首步是插件渲染的过程步 → 落座该步内、其内容上方；
@@ -93,9 +91,8 @@ export function barAnchorOf(seg: Timeline["segByKey"][string], model: Timeline["
 	if (first && first.kind === "assistant-step") {
 		return { key: seg.keys[0], pos: "before" };
 	}
-	if (seg.endType === "body" && seg.boundaryKey) {
-		return { key: String(seg.boundaryKey), pos: "before" };
-	}
+	const anchor = bodyAnchor(seg);
+	if (anchor !== null) return anchor;
 	if (seg.prevBody) return { key: seg.prevBody, pos: "after" };
 	if (model.processKey !== undefined) return { key: model.processKey, pos: "before" };
 	return null;
@@ -108,44 +105,36 @@ export function projectView(timeline: Timeline, ui: ProjectUI): Projection {
 	if (ui.active) {
 		for (const model of timeline.turns) {
 			for (const seg of model.segments) {
-				const expanded = ui.isExpanded(seg.segKey) === true;
-				let state: NodeViewState;
-				if (expanded) state = "visible";
-				else if (seg.endType === "open") state = model.closed ? "hidden" : "preview";
-				else state = "hidden";
-				let bodyReasoning = false;
-				if (seg.endType === "body") {
-					bodyReasoning = seg.boundaryKey !== null && hasReasoning(timeline.nodes.get(seg.boundaryKey));
-				}
+				const expanded = ui.isExpanded(seg.segKey);
+				// B1：正文段且正文带思维链也必有栏（展开可看正文内思维链）。
+				const bodyReasoning = seg.endType === "body" && hasReasoning(timeline.nodes.get(seg.segKey));
 				if (seg.toolCalls > 0 || seg.hasReasoning || bodyReasoning) {
 					// B2 栏锚定：落座段首上方（见上方规则说明与 barAnchorOf）。
 					const anchor = barAnchorOf(seg, model, timeline.nodes);
 					if (anchor !== null) {
-						let anchorBars = barsByAnchor.get(anchor.key);
-						if (anchorBars === undefined) {
-							anchorBars = [];
-							barsByAnchor.set(anchor.key, anchorBars);
-						}
-						anchorBars.push({ segKey: seg.segKey, toolCalls: seg.toolCalls, messages: seg.messages, pos: anchor.pos });
+						const anchorBars = barsByAnchor.get(anchor.key) ?? [];
+						anchorBars.push({ segKey: seg.segKey, toolCalls: seg.toolCalls, messages: seg.endType === "body" ? 1 : 0, pos: anchor.pos });
+						barsByAnchor.set(anchor.key, anchorBars);
 					}
 				}
 				for (const key of seg.keys) {
-					let keyState = state;
-					if (keyState === "preview" && key !== seg.latestKey) keyState = "hidden";
+					// F3/F4/F5：展开 → 全可见；收起的流式开放段仅最近一条过程
+					// 保留预览；其余（闭合段 / 中止轮尾段）全隐藏。
+					let visible = expanded || (seg.endType === "open" && !model.closed && key === seg.latestKey);
 					const node = timeline.nodes.get(key);
 					if (node && classifyNode(node) === "empty-step") {
 						// 空载步（无可见内容也无思维链）恒隐藏。
-						views.set(key, { role: "empty-step", segKey: seg.segKey, state: "hidden" });
+						views.set(key, { role: "empty-step", segKey: seg.segKey, visible: false });
 						continue;
 					}
 					// think 不折叠：仅推理过程步在收起段内保持显示（React 侧，
 					// assistant-step 座位由插件渲染）。
-					const auxKey = node ? auxKeyOfNode(node) : undefined;
-					if (keyState === "hidden" && auxKey === "think" && ui.auxVisible("think")) {
-						keyState = "visible";
+					const auxKey = auxKeyOfNode(node);
+					if (!visible && auxKey === "think" && ui.auxVisible("think")) {
+						visible = true;
 					}
-					views.set(key, { role: "process", segKey: seg.segKey, state: keyState });
-					if (keyState === "hidden" && node && (node.kind === "tool-call" || node.kind === "context" || node.kind === "system-prompt")) {
+					views.set(key, { role: "process", segKey: seg.segKey, visible });
+					if (!visible && node && (node.kind === "tool-call" || node.kind === "context" || node.kind === "system-prompt")) {
 						// assistant-step 座位由插件渲染，走 React 隐藏；CSS 只管官方渲染的 kind。
 						// 豁免键由匹配表（§1 AUX_TYPES）查出，设置页按类型开关。
 						if (auxKey !== undefined && ui.auxVisible(auxKey)) continue;
@@ -158,17 +147,13 @@ export function projectView(timeline: Timeline, ui: ProjectUI): Projection {
 	}
 	// 正文视图：正文键恒可见（F1），带上其前一段 segKey 供正文内思维链联动
 	//（前段不存在时为 null，思维链不受任何栏联动）。
-	for (const turnKey in timeline.turnByKey) {
-		for (const bodyKey of timeline.turnByKey[turnKey].bodies) {
-			views.set(bodyKey, {
-				role: "body",
-				segKey: timeline.bodySeg[bodyKey] !== undefined ? timeline.bodySeg[bodyKey] : null,
-				state: "visible"
-			});
+	for (const model of timeline.turns) {
+		for (const bodyKey of model.bodies) {
+			views.set(bodyKey, { role: "body", segKey: timeline.bodySeg[bodyKey] ?? null, visible: true });
 		}
 	}
 	return {
-		active: ui.active === true,
+		active: ui.active,
 		timeline: timeline,
 		views: views,
 		barsByAnchor: barsByAnchor,
@@ -177,29 +162,19 @@ export function projectView(timeline: Timeline, ui: ProjectUI): Projection {
 }
 
 // ---------- §6 缓存与订阅（单一事实） ----------
-// Timeline 按 chat 快照对象身份缓存：同一次发布的快照只推导一次，所有座位
-// 在同一次 commit 中读到同一个 Timeline / Projection（I2）。
-const timelineCache = new WeakMap<object, Timeline>();
-
-export function getTimeline(chat: unknown): Timeline | undefined {
-	if (!isChatSnapshot(chat)) return undefined;
-	let cached = timelineCache.get(chat);
-	if (cached === undefined) {
-		cached = buildTimeline(chat.order, chat.nodes);
-		timelineCache.set(chat, cached);
-	}
-	return cached;
-}
-
-const projectionCache = new WeakMap<object, CachedProjection>();
-
-interface CachedProjection {
+// 快照 → { timeline, 投影及其生效时的三个 store 版本 }，单表两级失效：
+// timeline 只随快照对象身份变化（同一次发布的快照只推导一次，所有座位
+// 在同一次 commit 中读到同一个 Timeline / Projection，I2）；projection 在
+// 段展开 / 豁免表 / 显示模式任一版本变化时基于同一 timeline 重建。
+interface CacheEntry {
+	timeline: Timeline;
 	segVersion: number;
 	configVersion: number;
 	transcript: string;
-	active: boolean;
 	projection: Projection;
 }
+
+const cache = new WeakMap<object, CacheEntry>();
 
 // 补点行为在 React 之外读取模型（S2 停止条件，见 autoload.ts），这里保持
 // 最新投影引用。
@@ -210,29 +185,19 @@ export function getLatestProjection(): Projection | null {
 }
 
 export function getProjection(chat: unknown): Projection | null {
-	const timeline = getTimeline(chat);
-	if (timeline === undefined) return null;
+	if (!isChatSnapshot(chat)) return null;
 	const active = isFoldActive();
-	const cached = isChatSnapshot(chat) ? projectionCache.get(chat) : undefined;
-	if (cached !== undefined && cached.segVersion === getSegVersion() &&
-		cached.configVersion === getAuxVersion() && cached.transcript === getTranscriptMode() &&
-		cached.active === active) {
+	const segVersion = getSegVersion();
+	const configVersion = getAuxVersion();
+	const transcript = getTranscriptMode();
+	const cached = cache.get(chat);
+	if (cached !== undefined && cached.segVersion === segVersion &&
+		cached.configVersion === configVersion && cached.transcript === transcript) {
 		return cached.projection;
 	}
-	const projection = projectView(timeline, {
-		active: active,
-		auxVisible: includesAux,
-		isExpanded: isSegExpanded
-	});
-	if (isChatSnapshot(chat)) {
-		projectionCache.set(chat, {
-			segVersion: getSegVersion(),
-			configVersion: getAuxVersion(),
-			transcript: getTranscriptMode(),
-			active: active,
-			projection: projection
-		});
-	}
+	const timeline = cached !== undefined ? cached.timeline : buildTimeline(chat.order, chat.nodes);
+	const projection = projectView(timeline, { active, auxVisible: includesAux, isExpanded: isSegExpanded });
+	cache.set(chat, { timeline, segVersion, configVersion, transcript, projection });
 	latestProjection = projection;
 	return projection;
 }
@@ -241,15 +206,10 @@ export function getProjection(chat: unknown): Projection | null {
 // ChatSnapshot 里（order + nodes store，nodes.get(key) 兼容旧 Map 读法）。
 export type UseChat = (selector: (state: unknown) => unknown) => unknown;
 
-export function chatOf(props: { useChat?: UseChat }): unknown {
-	const useChat = props.useChat;
-	if (typeof useChat !== "function") return undefined;
-	return useChat((state) => state);
-}
-
 export function useProjection(props: { useChat?: UseChat }): Projection | null {
 	React.useSyncExternalStore(subscribeAux, getAuxVersion);
 	React.useSyncExternalStore(subscribeSeg, getSegVersion);
 	React.useSyncExternalStore(subscribeTranscript, getTranscriptVersion);
-	return getProjection(chatOf(props));
+	const useChat = props.useChat;
+	return getProjection(typeof useChat === "function" ? useChat((state) => state) : undefined);
 }

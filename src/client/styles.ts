@@ -23,7 +23,6 @@ export const CSS = [
 	".dsh-tv-selector{background:var(--dsw-alias-bg-module-platform);height:36px;font:inherit;color:var(--dsw-alias-label-primary);cursor:pointer;border:none;border-radius:18px;align-items:center;gap:12px;padding:0 14px;font-size:14px;line-height:22px;display:inline-flex}",
 	".dsh-tv-selector:hover{background:var(--dsw-alias-interactive-bg-hover)}",
 	".dsh-tv-chevron{flex:none}",
-	".dsh-tv-select{background:var(--dsw-alias-bg-module-platform);height:36px;color:var(--dsw-alias-label-primary);cursor:pointer;border:none;border-radius:18px;align-items:center;gap:12px;padding:0 14px;font-size:14px;line-height:22px;display:inline-flex}",
 	// 「对话折叠」设置页（settings.section 独立标签页）
 	".dsh-fs-page{width:100%}",
 	".dsh-fs-head{border-bottom:.5px solid var(--dsw-alias-border-l2);padding:16px 0}",
