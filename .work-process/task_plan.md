@@ -157,7 +157,7 @@
 6. **分页锚点与当前 CSS 的冲突**
    - `data-chat-anchor-key` 在 ChatNodeSeat 外层 `div` 上；`loadOlder` 通过它记录并恢复 `anchorTop`。
    - 当前插件 CSS 用 `:has([data-dsh-hidden-turn]) { display:none }` 隐藏整个外层容器，会导致锚点行高度/位置消失，可能破坏分页恢复。
-   - **结论：改为只隐藏内部过程内容，保留外层 seat 与锚点元素；避免 `display:none` 作用在 `data-chat-flow-kind` 外层。**
+   - **结论：参考 master 的显示方案，隐藏行使用“非空占位 + 外层 `:has` 隐藏整行”，避免零高 flex item 继续占用列 gap；折叠栏所在行不放置隐藏占位。**
 
 7. **`fileMentions`/owner 官方路径已确认**
    - 官方 `AssistantNodeView`：`tail = useTurnData("turn-tail")`；`owner` 需要 `turn.status === "closed"`、`data.finalNode`、`tail.closing.finalNode.seq` 匹配；最终 body 才传 `fileMentions(owner)`。
@@ -173,19 +173,19 @@
   - `hasVisibleBody` 定义：至少有一个可见块；**text 块必须 `trim()` 后非空**，流式中的空 `""` 文本不得被当作已出正文。
 - 扫描某个 turn 窗口的节点列表：
   - 输入：`turnKeys = s.chat.locations.getTurn(turn)`，`nodes = s.chat.nodes`，以及该 turn 的 `TurnLocation`（从任一节点的 `node.location.turn` 可取得）。
-  - 维护 `lastBoundaryKey`、当前段统计（`firstProcessIndex` / `lastProcessIndex` / `processCount` / `hasBody`）。
+  - 维护 `lastBoundaryKey`、当前段统计（`firstProcessNodeKey` / `lastProcessNodeKey` / `processCount` / `hasBody`）。
   - 初始 `lastBoundaryKey = null`；窗口是否完整用 **`TurnLocation.start` 是否为 `undefined`** 判断：若已加载到 turn 起点，`start` 有值；若窗口从 turn 中间开始，`start === undefined`。**不能把当前窗口里第一个出现的边界当作前驱边界。**
   - 完整窗口（`TurnLocation.start !== undefined`，且窗口从该 turn 的开头 `user` / `steering` 开始）：
     1. 遇到 `user` / `steering`：它作为该段起点边界；`lastBoundaryKey = 该 key`，后续节点进入 `bnd:<该 key>`。
     2. 遇到**纯正文 `body`**（有可见 text/image 但无 reasoning）：该正文节点不作为过程；标记当前段 `hasBody = true`；之后 `lastBoundaryKey = 该正文 key`，后续节点进入 `bnd:<该正文 key>`。
-    3. 遇到**混合 `[reasoning + text]` 的 `assistant-step`**：它仍是正文边界（`hasBody = true`），且它的 `reasoning` 属于“切段前正在处理的段”的过程集合，参与该段 `processCount` / `firstProcessIndex` / `lastProcessIndex`；之后 `lastBoundaryKey = 该正文 key`，后续节点进入 `bnd:<该正文 key>`。
+    3. 遇到**混合 `[reasoning + 正文]` 的 `assistant-step`**（如 `[reasoning + text]`、`[reasoning + image]`）：它仍是正文边界（`hasBody = true`），且它的 `reasoning` 属于“切段前正在处理的段”的过程集合，参与该段 `processCount` / `firstProcessNodeKey` / `lastProcessNodeKey`；之后 `lastBoundaryKey = 该正文 key`，后续节点进入 `bnd:<该正文 key>`。
     4. 其他节点：属于当前段；若是 process，更新该段 `first / last / processCount`。
   - 不完整窗口（`TurnLocation.start === undefined`）：见下方前缘处理。
 - `segmentIdOf(boundaryKey)`：
   - 有 `boundaryKey`：`bnd:<boundaryKey>`
   - 无 `boundaryKey`：见前缘处理。
 - 纯正文 `body` 节点：永远渲染；不作为过程；不参与 `processCount`；不产生折叠栏。
-- 混合 `[reasoning + text]` 节点：同一节点在 `segmentInfo` 中需要同时表达两种角色——`processSegmentOf(nodeKey)` 指向上一段（其 reasoning 所在），`boundarySegmentOf(nodeKey)` 指向下一段（切段后）。`buildSegmentIndex` 不得只返回单一 `segmentIdByKey` 混淆这两种角色。
+- 混合 `[reasoning + 正文]` 节点：同一节点在 `segmentInfo` 中需要同时表达两种角色——`processSegmentOf(nodeKey)` 指向上一段（其 reasoning 所在），`boundarySegmentOf(nodeKey)` 指向下一段（切段后）。`buildSegmentIndex` 不得只返回单一 `segmentIdByKey` 混淆这两种角色。
 
 #### 前缘处理（关键）
 - DSH 分页实际按 message 边界，不是完整 turn 边界，因此窗口可能从 turn 中间开始。
@@ -216,13 +216,14 @@
   - `getSegmentVersion()`
   - `isSegmentExpanded(sessionId, segmentId)`
   - `setSegmentExpanded(sessionId, segmentId, expanded)`
-- 清理策略（定稿）：按 `sessionId` 分组存储 `segmentExpanded`；**不依赖未确认的 DSH session 卸载钩子**。采用固定策略：模块级记录 `activeSessionId`，当 `props.sessionId` 首次变成新值时主动清除上一个 `activeSessionId` 的整块 Map；当前 session 只保留本 session 条目。
+- **订阅约定（必做）**：所有在 `mode === "all"` 下读取 `segmentExpanded` 的组件（`AssistantNodeView`、`ToolCallGroup`、`ContextNodeView`）必须通过 `useSyncExternalStore(subscribeSegment, getSegmentVersion)` 订阅 `segmentVersion`；`ProcessFold` 自身也必须订阅，不依赖父组件重渲染。否则点击折叠栏后 ToolCallGroup/ContextNodeView 不会同步更新。
+- 清理策略（定稿）：按 `sessionId` 分组存储 `segmentExpanded`；**不依赖未确认的 DSH session 卸载钩子**。**不在渲染期间用 `activeSessionId` 主动清空上一个会话**，避免切回旧会话丢状态、并发挂载互相清空；默认保留已访问 session 的折叠状态。仅当确认 DSH 提供可用的 session 卸载/scope 销毁钩子后，再调用 `clearSessionSegments(sessionId)` 做内存回收。
 
 ### 3. 段索引与内容更新订阅
 - `buildSegmentIndex(turnKeys, nodes, turn, turnLocation)`：
   - 输入 `turnKeys = s.chat.locations.getTurn(turn)`，`nodes = s.chat.nodes`，`turnLocation = node.location.turn`（用于 `start` 判定完整窗口）；
-  - 返回 `segmentInfoByNode` / `segmentInfo`、`processSegmentOf(nodeKey)`、`boundarySegmentOf(nodeKey)`；**不提供单一 `segmentIdByKey`**，避免混合正文节点“过程角色”和“边界角色”冲突。
-- `segmentInfo` 每项：`firstProcessIndex`、`lastProcessIndex`、`processCount`、`hasBody`、`segmentId`、`isFrontEdge`。
+  - 返回 `segmentInfo`、`processSegmentOf(nodeKey)`、`boundarySegmentOf(nodeKey)`、`segmentOfNode(nodeKey)`；**不提供单一 `segmentInfoByNode` / `segmentIdByKey`**，避免混合正文节点“过程角色”和“边界角色”冲突。
+- `segmentInfo` 每项：`firstProcessNodeKey`、`lastProcessNodeKey`、`processCount`、`hasBody`、`segmentId`、`isFrontEdge`。
 - 订阅方式必须让组件在流式内容更新时真正 re-render：
   ```js
   var nodes = useSession(function (s) { return s.chat.nodes; });
@@ -241,17 +242,17 @@
 - 折叠栏只渲染在该段第一个过程节点上；没有过程就没有折叠栏。
 - `ProcessFold` 接收 `sessionId`、`segmentId`、`processCount`；由 `AssistantNodeView` / `ToolCallGroup` 从 `buildSegmentIndex` 得到的 `segmentInfo` 传入，不再由组件内部通过 turn 自行推断。
 - 所有正文节点始终渲染。
-- 混合 `[reasoning + text]` 正文节点（既是正文边界也是过程承载节点）：
+- 混合 `[reasoning + 正文]` 正文节点（`hasReasoning && hasVisibleBody`，含 reasoning+image；既是正文边界也是过程承载节点）：
   - 该节点永远作为正文节点渲染；
-  - 若它属于某个段的 `firstProcessIndex`，其上方渲染该段的 `ProcessFold`；
-  - collapsed：`hideReasoning: true`，只渲染正文；展开：完整渲染全部 blocks。
-  - **例外：若 `segmentInfo.isFrontEdge === true`，`shouldHideReasoning` 必须返回 false**——前缘区不折叠任何已加载过程，包括混合 nodes 的 reasoning。
+  - 若它属于某个段的 `firstProcessNodeKey`，其上方渲染该段的 `ProcessFold`；
+  - collapsed：按 `shouldHideReasoning(...)` 判断；正常 collapsed 隐藏 reasoning、只渲染正文；展开：完整渲染全部 blocks。
+  - **例外：若 `segmentInfo.isFrontEdge === true`，`shouldHideReasoning` 必须返回 false**——前缘区不折叠任何已加载过程，包括混合 nodes 的 reasoning；`shouldHideReasoning` 仅用于这种混合 `[reasoning + 正文]` 正文节点。
   - 该节点的 `reasoning` 计入所在段（切段前的那一段）的 `processCount`；`body` 部分同时作为该 turn 的正文边界，切出下一段。
 - 纯正文 `body` 节点：永远渲染，不作为过程节点，不参与 `processCount`，也不产生折叠栏。
 - 过程节点：
   - 折叠时隐藏；
   - 展开时全部显示；
-  - 当前段还没有正文时，只显示最近一次过程预览。
+  - 当前段还没有正文时，只显示最近一次过程预览；该预览节点必须完整渲染 blocks（含 reasoning/tool-call），不得再按 `shouldHideReasoning`/`shouldHideProcessContent` 隐藏自身。
 - 单过程且无正文时：同一节点既是 first 又是 last，必须渲染 `折叠栏 + 该过程内容`，不能只渲染折叠栏。
 - 折叠/展开切换不得卸载外层 `data-chat-anchor-key` 或折叠栏自身：同一次展开→收起→展开后，折叠栏元素必须仍在原位置且可再次切换（作为“展开后折叠栏直接消失”的回归验收项）。
 - 模式边界：
@@ -272,9 +273,10 @@
 
 ### 6. `context` / `skill` 辅助项接入新段模型（仅 `all` 模式）
 - `ContextNodeView` 仅当 `mode === "all"` 时使用：
-  - 计算所属 `segmentId`；
+  - 先用 `buildSegmentIndex` 的 `segmentOfNode(node.key)` 计算所属 `segmentId`（context 不是过程也不是正文边界，不能用 `processSegmentOf`）；
   - 可见条件：`segmentExpanded(sessionId, segmentId) || includesAux("context")`。
 - `ToolCallGroup` 的 `skill` 分支仅当 `mode === "all"` 时使用：
+  - 先用 `segmentOfNode(node.key)` 计算所属 `segmentId`；
   - 可见条件：`segmentExpanded(sessionId, segmentId) || includesAux("skill")`。
 - **前缘段特殊规则**：前缘段不渲染折叠栏、不产生 `segmentExpanded`，但 `context` / `skill` **仍按全局 `includesAux` 判断**（默认 `context`+`skill` 显示；用户配置 `auxVisible: []` 则隐藏），不因前缘段强制全部显示。
 - `toolcall` / `none` 模式保持现有逻辑，不改为 segment 判断。
@@ -284,10 +286,10 @@
 - 前缘不完整段不持久化状态，避免“加载更早”后状态漂移。
 - 分页/锚点具体策略（第四轮审查后改为规格，不再是“优先考虑”）：
   - 删除会对 `[data-chat-flow-kind=...]` 外层 seat 设置 `display:none` 的 CSS；
-  - 保留 DSH 外层 `data-chat-anchor-key` / `ChatNodeSeat` 始终在 DOM 中；
-  - 被折叠的过程行改为“外层 seat 仍挂载，内部过程内容通过 `[data-dsh-hidden-process]` 局部隐藏”；
-  - 不要求固定高度占位；折叠后高度允许为 0，但必须通过实测确认 DSH `loadOlderAnchored` 的 `anchorTop` 仍能正常记录/恢复；
-  - 若实测仍依赖 height 变化，则仅对隐藏过程行加最小占位高度，绝不隐藏外层锚点。
+  - 隐藏行改为非空 `HiddenProcessNode()` / `HiddenAuxNode()`，并通过对 `[data-chat-flow-kind=...]` 外层 seat 的 `:has(...)` 规则隐藏整行，避免零高 flex item 继续占用 16px 列 gap；
+  - 折叠栏所在行只渲染 `ProcessFold`，不放置隐藏占位，避免 `:has` 把折叠栏一起隐藏；
+  - 不要求固定高度占位；当前优先修复折叠栏与正文之间的大段空白；
+  - 若后续实测隐藏行锚点对分页有影响，再为这些行设计非布局型锚点方案；目前不保留隐藏行的布局占位。
 - 需求 8 纳入本轮：
   - 实际验证“加载更早”滚动 / 分页；
   - 若隐藏行影响 DSH 分页 / 锚点，本轮一并修复，不推迟。
@@ -310,6 +312,7 @@
   - `mentions` 只在满足官方条件时传入，其余正文传 `undefined`。
 - 注意：所有有可见正文的 assistant-step 都渲染正文（需求 2），不要再用“是否最终正文”来决定是否渲染正文；`closingOfTurn` / `isClosingAssistantNode` 从实现中移除，对应静态测试同步改为断言 `useTurnData("turn-tail")` 路径。
 - 不能只概括为“传官方 fileMentions/useTurnData”。
+- 范围边界：本次 `useTurnData` / `fileMentions` 的正文保真只保证 `all` 模式；`toolcall` / `none` 保持现有分支行为，不额外恢复 `fileMentions`，作为已声明的已知限制。
 
 ### 10. 折叠栏步骤数
 - `ProcessFold` 在按钮右侧显示 `processCount + " 个步骤"`。
@@ -334,25 +337,26 @@
 - 从 `lib/segments.js` 导出纯决策辅助函数，供渲染层调用：
   - `buildSegmentIndex(turnKeys, nodes, turn, turnLocation)`
   - `segmentIdOfBoundary(boundaryKey)`
-  - `processSegmentOf(nodeKey)` / `boundarySegmentOf(nodeKey)`
+  - `processSegmentOf(nodeKey)` / `boundarySegmentOf(nodeKey)` / `segmentOfNode(nodeKey)`
   - `isFrontEdgeSegment(segmentInfo)`
   - `shouldRenderFoldBar(segmentInfo, nodeKey)`
   - `shouldHideProcessContent(segmentInfo, nodeKey, expanded)`
   - `shouldHideReasoning(segmentInfo, node, expanded)`
-  - `shouldHideAux(segmentInfo, auxKey, expanded)`（context/skill 用）
-  - 这些函数覆盖“混合 reasoning+text 的折叠/展开渲染规则”，避免只能用 React 渲染器测试。
+  - `shouldHideAux(segmentInfo, auxKey, expanded, includesAuxResult)`（context/skill 用）
+  - 这些函数覆盖“混合 `reasoning + 正文`（含 reasoning+image）的折叠/展开渲染规则”，避免只能用 React 渲染器测试。
 - `shouldHideProcessContent` 明确语义：
   - 前缘段：永不隐藏；
   - 有正文段 + collapsed：所有 process 隐藏；
   - 无正文段 + collapsed：仅最后 process 可见（预览），其余隐藏；
   - 任意段 + expanded：全部可见。
 - 辅助函数契约（实施前定稿）：
-  - `buildSegmentIndex` 返回 `{ segmentInfoByNode, segmentInfo, processSegmentOf, boundarySegmentOf }`。
+  - `buildSegmentIndex` 返回 `{ segmentInfo, processSegmentOf, boundarySegmentOf, segmentOfNode }`；**不提供 `segmentInfoByNode` / 单一 `segmentIdByKey`**。
   - `SegmentInfo` 字段：`segmentId`、`isFrontEdge`、`hasBody`、`firstProcessNodeKey`、`lastProcessNodeKey`、`processCount`。
   - `processSegmentOf(nodeKey)`：节点作为“过程”所属的段；仅 process 或混合 body 有值，其余 `undefined`。
   - `boundarySegmentOf(nodeKey)`：节点作为“边界”开启的下一段；仅边界节点有值，其余 `undefined`。
-  - `shouldHideReasoning(segmentInfo, node, expanded)`：`segmentInfo.isFrontEdge === true` → `false`；普通 collapsed 且节点含 reasoning → `true`；expanded 或节点不含 reasoning → `false`。
-  - `shouldHideAux(segmentInfo, auxKey, expanded)`：接收已经算好的 `includesAux(auxKey)` 结果，不直接读全局 config。
+  - `segmentOfNode(nodeKey)`：仅表示节点按位置落在哪个段，不承担过程/边界角色；**只供 context/skill 等既不是过程、也不是边界的辅助节点查询**。对过程、`user` / `steering`、纯正文/混合正文等过程/边界节点返回 `undefined`。
+  - `shouldHideReasoning(segmentInfo, node, expanded)`：仅用于混合 `[reasoning + 正文]` 正文节点（`hasReasoning && hasVisibleBody`）；`segmentInfo.isFrontEdge === true` → `false`；普通 collapsed 且节点含 reasoning → `true`；expanded 或节点不含 reasoning → `false`。无正文段的最后预览纯过程节点不走此函数，必须完整渲染。
+  - `shouldHideAux(segmentInfo, auxKey, expanded, includesAuxResult)`：接收已经算好的 `includesAux(auxKey)` 结果，不直接读全局 config。
 - 现有静态测试与新行为冲突，需要**在同一批实现中同步更新**：
   - 将“仅最终正文”断言改为“所有有可见正文的 assistant-step 都渲染”；
   - 将 `closingOfTurn` / `isClosingAssistantNode` 的断言改为 `useTurnData("turn-tail")` 路径；
@@ -362,10 +366,18 @@
   - 窗口从 turn 中间截断：前缘段不折叠/不持久化状态；
   - 加载更早后边界出现：前缘段状态不迁移不串；
   - **durable `user` 出现但 `TurnLocation.start` 仍为 undefined**：`u1` 后的节点立即进入 `bnd:u1`；
-  - **前缘区首个混合 `[reasoning + text]` body**：`shouldHideReasoning` 返回 false；
+  - **前缘区首个混合 `[reasoning + 正文]` body（含 reasoning+image）**：`shouldHideReasoning` 返回 false；
   - **空 `""` text 块**：不计入 `hasVisibleBody`，不产生正文边界；
-  - 混合 `reasoning + text` 节点：属于前一段过程集合且可作为首过程渲染折叠栏；
+  - 混合 `reasoning + 正文` 节点（含 reasoning+image）：属于前一段过程集合且可作为首过程渲染折叠栏；
+  - `segmentOfNode`：context/skill 等非过程、非边界节点返回位置归属段；对 process、`user` / `steering`、纯正文/混合正文等过程/边界节点返回 `undefined`；与 `processSegmentOf`/`boundarySegmentOf` 不冲突；
+  - 无正文段 collapsed 的最后预览纯过程节点：必须完整渲染 blocks（含 reasoning），不得被 `shouldHideReasoning`/`shouldHideProcessContent` 隐藏自身；
+  - 流式场景：同一节点从纯 `reasoning` 变为混合 `[reasoning + 正文]` 时，`hasBody`、`processSegmentOf`、`boundarySegmentOf` 的最终状态正确；
   - `user` / `steering` / `body` 边界归属与独立折叠。
+- 静态 / 回归验证（除纯函数外必须覆盖）：
+  - 所有隐藏分支必须返回非空占位（`HiddenProcessNode` / `HiddenAuxNode`），且包含针对 `[data-chat-flow-kind=...]` 外层的 `:has` 隐藏规则，保证隐藏行不参与列 gap。
+  - 交互回归：点击折叠栏后 `ToolCallGroup` 的过程隐藏状态与 `ContextNodeView` 的 aux 可见性必须同步变化，证明这些组件已订阅 `segmentVersion`。
+  - 至少做轻量模拟确认 `turnKeys` / `nodeValues` 变化会使 `buildSegmentIndex` 重算；若无法自动化，必须列入强制手工回归清单。
+  - 手工回归清单必须包含：刷新、加载更早、流式过程中正文从无到有（折叠栏/最后预览不消失）、展开→收起→展开后折叠栏不消失、上一轮展开不影响下一轮、`pendingSteering` 不被插件隐藏/遮挡。
 - 分两阶段：
   1. 实现阶段：所有测试必须可运行，`node --test` 全绿；
   2. 用户实际验证通过后：再定稿最终断言和浏览器验收记录，不把“临时可运行”与“最终定稿”混为一谈。
@@ -403,6 +415,9 @@
 - 工作树未改代码：`lib/client.js`、`lib/index.js`、`lib/segments.js`（尚未创建）均保持干净/不存在。
 - 第四、五、六轮子 agent 审查已完成并并入：前缘初始边界矛盾、混合 reasoning+text 边界角色、fileMentions 需 TurnLocation 对象、`TurnLocation.start` 判定完整窗口、`lib/segments.js` 模块格式等已修订。
 - 第六轮严重评级：**无 SEVERE 问题**；剩余为 5 个 MODERATE 和若干 MINOR，已在本计划中定稿。
+- 第七轮子 agent 审查：发现 **7 个 P2 级问题**，均已修订归档：统一 `segmentOfNode` / `shouldHideAux` 签名 / `SegmentInfo` 字段，明确 `shouldHideReasoning` 仅用于混合正文节点及最后预览完整渲染，明确 `fileMentions` 仅保证 `all` 模式，补充流式/锚点/占位回归验证，取消渲染期主动清空旧 session 状态。
+- 第八轮子 agent 复核：发现 **3 个 P2 级问题**，已修订归档：`segmentOfNode` 明确只服务非过程/非边界节点且对过程/边界返回 `undefined`；混合正文统一为 `hasReasoning && hasVisibleBody`（覆盖 reasoning+image）；补充流式角色变化与前缘迁移回归。
+- 第九轮子 agent 终审：发现 **1 个 P2 级问题**（`segmentVersion` 订阅未覆盖所有读取 `segmentExpanded` 的组件），已修订：明确 `AssistantNodeView` / `ToolCallGroup` / `ContextNodeView` 必须订阅 `segmentVersion`，`ProcessFold` 自身也订阅，并加入同步交互回归。
 - 用户确认 Ctrl+Enter 插话走 `pendingSteering` 路径；第五轮审查定稿：**pendingSteering 不纳入段状态机**，只把落库后的 durable `steering` 作为边界。
 - 文档同步已完成：`README.md` 与 `cordis.patch.yml` 注释已改为“未配置时默认 `context` + `skill`”。
 - 等待用户确认本计划；确认后按本计划实施代码。
