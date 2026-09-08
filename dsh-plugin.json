@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Yan-Zero/dsh-std/main/packages/manifest/schema/dsh-plugin-0.15.schema.json",
+  "manifestVersion": "0.15",
+  "id": "the-heart-fickle.dsh-conversation-folding",
+  "name": "DSH Conversation Folding",
+  "version": "0.1.0",
+  "license": "MIT",
+  "source": {
+    "repository": "https://github.com/TheHeartFickle/dsh-conversation-folding"
+  }
+}

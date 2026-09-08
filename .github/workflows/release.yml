@@ -19,6 +19,9 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Test
         run: npm test
 

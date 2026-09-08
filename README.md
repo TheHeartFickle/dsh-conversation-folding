@@ -19,10 +19,11 @@
   - 生成过程中自动跟随底部，方便实时阅读。
   - 新的思维链出现时，只折叠紧邻的前一个，保持上下文连续。
 
-- **辅助项可见性可配置**
-  - 代码内部默认将上下文注入、skill 加载等辅助项全部隐藏。
-  - 插件默认配置把 `context` 和 `skill` 列为例外，因此安装后仍会显示。
-  - 在 profile 中用 `auxVisible: []` 可覆盖为全部隐藏。
+- **折叠的步骤类型可按类型配置**
+  - 设置 →「对话折叠」独立标签页：18 个步骤类型分别开关是否折叠
+    （bash / think / read / write / edit / glob / grep / web / skill / 子代理 /
+    后台任务 / goal / 任务清单 / 提问 / ralph / workflow / 上下文注入 / 系统提示词）。
+  - 默认不折叠：上下文注入、skill、系统提示词；其余类型折叠。
 
 ## 📦 安装
 
@@ -51,35 +52,23 @@ dsh registry enable the-heart-fickle/dsh-conversation-folding
    - 思考/工具调用过程被折叠为独立折叠栏；
    - 正文开始输出后，过程自动隐藏；
    - 点击“展开过程”可查看完整过程。
-3. 想要关闭整轮折叠时，修改配置中的 `foldMode` 即可。
+3. 想回到官方渲染时，在设置中把「对话显示」切换为 Normal / Compact 即可。
 
 ## ⚙️ 配置
 
-在 profile 的 `cordis.patch.yml` 中配置：
+全部配置在浏览器端「设置」内完成，经 host 设置系统持久化到
+`~/.dsh/settings.yaml`（`dsh-conversation-folding:` 命名空间），跨端/重载恢复：
 
-```yaml
-- id: conversation-folding
-  name: '@the-heart-fickle/dsh-conversation-folding'
-  config:
-    foldMode: 'all'
-    auxVisible:
-      - context
-      - skill
-```
+- **对话显示**（设置 → 对话显示）：`Normal` / `Compact` / `Fold`。仅「Fold」由
+  本插件接管过程折叠，折叠行为只有一种：整轮折叠，正文永不折叠。
+- **对话折叠**（独立标签页）：各步骤类型的「是否折叠」开关。工具调用按 host
+  工具注册表的字面注册名经匹配表精确匹配（如 `pwsh`→Shell 命令、
+  `str_replace_editor`→编辑文件、`todo_write`→任务清单、`ask_user_question`→提问）；
+  未列入匹配表的工具类型始终折叠。默认不折叠：上下文注入、skill、系统提示词。
+  浏览器 localStorage 不存任何配置。
 
-`foldMode` 可选值：
-
-| 值 | 行为 |
-|---|---|
-| `all` | 整轮折叠，默认值 |
-| `toolcall` | 只折叠 thinking 之间的 tool call |
-| `none` | 关闭整轮折叠和 tool-call 分组，保留 thinking 增强样式 |
-
-`auxVisible` 是“折叠时仍显示”的辅助项例外列表：
-
-- `context`：上下文注入行；不在列表中时折叠状态下隐藏。
-- `skill`：skill 加载行；不在列表中时折叠状态下隐藏。
-- `auxVisible: []` 表示所有辅助项都隐藏（相当于之前的全隐藏行为）。
+> 0.1.x 曾支持 profile `cordis.patch.yml` 下发 `foldMode` / `auxVisible`；自本版本起
+> 配置全部移到浏览器设置，host 不再持有配置。
 
 ## 🗂️ 效果示意
 
@@ -87,26 +76,45 @@ dsh registry enable the-heart-fickle/dsh-conversation-folding
 
 ```text
 用户输入
-┌──────────────────────────────┐
-│ 折叠栏：展开过程              │
-└──────────────────────────────┘
+┌──────────────────────────────────┐
+│ 折叠栏：展开过程   N 个步骤      │
+└──────────────────────────────────┘
 最近一次 thinking / tool call（增强样式）
 ```
 
-**正文输出后**
+**正文输出后（多段正文全部保留，仅过程折叠）**
 
 ```text
 用户输入
-┌──────────────────────────────┐
-│ 折叠栏：展开过程              │
-└──────────────────────────────┘
-LLM 输出（原生正文样式）
+┌──────────────────────────────────┐
+│ 折叠栏：展开过程   N 个步骤      │
+└──────────────────────────────────┘
+LLM 输出（原生正文样式，中间播报也完整可见）
 ```
 
 ## 🔧 环境要求
 
 - Node.js ≥ 20
-- DSH（DeepSeek Harness）
+- DSH ≥ 0.1.2-rc.1（client 半边依赖 0.1.2 的 `useChat` ChatSnapshot）
+
+## 📡 通信架构
+
+host 半边只经官方 settings 服务触达配置：注册自有 settings 命名空间，经插件
+RPC 路由 `/conversation-folding/config` 读写（`src/index.ts`）；client 半边经
+官方 Loader + slots 注入（0.1.2 slot 选举制约束见 `docs/SPEC.md` 与
+`docs/BUGS.md`）：
+
+- **构建**：源码在 `src/`（host 半边 `src/index.ts`，浏览器端 `src/client/`），
+  `npm run build` 经 esbuild 生成 `lib/`——`lib/index.js` 与以
+  `window.__ModuleLoader__.load({ id, factory })` 包装注册的单文件 bundle
+  `lib/client.js`（除 react 与官方 primitives 外全部内联）。`lib/` 为构建产物
+  不入库，`npm test` 前自动构建。
+- **官方 Loader**：`dsh.plugin.json` 仅负责装载浏览器半边 `lib/client.js`；
+  host 壳（`lib/index.js`）是零依赖占位，不注入任何官方服务。
+- 显隐实现约束（0.1.2 slot 选举制）：shadow 官方 tool-call 树再转发不可行
+  （shadowed entry 对查询不可见，输赢取决于 bundle 加载顺序），插件只 shadow
+  `assistant-step` / `turn-process`，tool-call / context 由按座位 anchor key
+  生成的动态 CSS 控制显隐，官方组件原生渲染。
 
 ## 许可证
 

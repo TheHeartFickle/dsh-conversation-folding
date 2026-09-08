@@ -21,6 +21,7 @@ const out = join(root, 'registry');
 /** Files copied into registry/, preserving relative paths. */
 const files = [
   'dsh.plugin.json',
+  'dsh-plugin.json',
   'lib',
   'cordis.patch.yml',
   'README.md',
