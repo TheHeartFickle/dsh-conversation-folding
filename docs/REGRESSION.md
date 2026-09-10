@@ -2,9 +2,12 @@
 
 > 本文档有且仅有用于回归测试：收录回归检查条目（检查点 + 预期）与当前通过状态。
 > 行为契约见 SPEC.md，缺陷根因与修复记录见 BUGS.md，安装配置见 README.md。
-> 条目分两层执行：模型/投影规则（R/F/B/S）由 `npm test`（test/model.test.mjs，
-> 驱动真实 bundle 的纯函数）机械化覆盖；生效层与官方交互在浏览器实测
-> （browser-harness）。验证层标记：M = 机械化用例，B = 浏览器实测。
+> 条目分两层执行：模型/投影规则（R/F/B/S）与补点循环由 `npm test`（驱动真实
+> bundle 的纯函数 + DOM 桩，`test/*.test.mjs`）机械化覆盖；生效层与官方交互由
+> `npm run test:e2e` 对真实 `dsh web` 无头实测（自包含 lane：scratch DSH_HOME +
+> 仓库内 fixture + Playwright，见 `tests/e2e/README.md`）。
+> `test/browser/*.py` 是历史 browser-harness 本机脚本，保留但不再是回归入口。
+> 验证层标记：M = 机械化用例，B = 浏览器实测。
 
 ## 执行基线
 
@@ -16,7 +19,7 @@
 
 ## 当前未通过
 
-（无——2026-09-07 架构重构后全量回归，状态见文末缺陷对照表。）
+（无——2026-09-09/10 复跑：M 层 `npm test` 86/86、B 层 `npm run test:e2e` 16/16 全绿，状态见文末缺陷对照表。）
 
 ---
 
@@ -26,18 +29,18 @@
 - 检查「设置 → 通用设置 → 对话显示」。
 - 预期：标题/描述为官方文案，下拉按钮为官方样式；选项恰为 `Normal` / `Compact` / `折叠` 三项，前两者名称与官方一致。（⬜ 待执行）
 
-### T-A2 三种显示模式各自生效
+### T-A2 三种显示模式各自生效（M + B ✅）
 - 依次选择 Normal / Compact / 折叠，每次重载后检查。
 - 预期：
   - Normal / Compact：`.dsh-turnfold` 数量为 0，`data-dsh-fold-mode` 非 `all`，渲染与官方一致；
   - 折叠：`data-dsh-fold-mode="all"`，折叠栏出现；
-  - `localStorage["dsh-conversation-folding.displayMode"]` 对应 `normal` / `compact` / `fold`。（⬜ 待执行）
+  - `localStorage["dsh-conversation-folding.displayMode"]` 对应 `normal` / `compact` / `fold`。（本插件配置走 host 设置服务，localStorage 只留官方显示模式）
 
 ## B 折叠栏 UI
 
-### T-B1 样式与官方 turn-process 一致
+### T-B1 样式与官方 turn-process 一致（M + B ✅）
 - 对任一折叠栏取 `getComputedStyle`。
-- 预期：`height` 约 33px；`border-bottom` 为细线；背景透明；收起时 chevron `rotate(-90deg)`、展开时 `rotate(0)`；非卡片/圆角背景样式。（⬜ 待执行；实测采样已见 33px）
+- 预期：`height` 约 33px；`border-bottom` 为细线；背景透明；收起时 chevron `rotate(-90deg)`、展开时 `rotate(0)`；非卡片/圆角背景样式。（静态 CSS 由 `test/ui-static.test.mjs` 守住，真实 computedStyle 由本 lane 实测）
 
 ### T-B2 文案格式（M + B ✅）
 - 分别检查含工具调用、仅思考、无正文尾段三类栏。
@@ -91,16 +94,19 @@
 
 ## D 历史加载（B1）
 
-### T-D1 一次点击补到最旧折叠栏完整（B ✅）
+### T-D1 一次点击补到最旧折叠栏完整（M + B ✅）
 - 在需多次翻页的长会话中点一次「加载更早」。
 - 预期：自动补点直到被监视的最旧折叠栏步骤完整后停止；顶部按钮仍在（除非已无更早历史）；不得拉到会话最顶、不得拉完全部历史。
+- M 层锚点：`test/autoload.test.mjs`（DOM 桩 + 假定时器驱动真实补点循环）——S1 出新栏即停、S2 步骤数不再增长才停、投影缺段（无数据哨兵）即停、补点次数精确。浏览器 lane 的 fixture 一页即补完被监视段（用户那次点击自身已满足 S1），只能观测到 1 次点击，循环内部无判别力，故补点强度由 M 层承担（见 tests/e2e/README.md「已知覆盖边界」）。
 
-### T-D2 按钮重挂后续点（B ✅）
+### T-D2 按钮重挂后续点（M + B ✅）
 - 连续补点期间观察。
 - 预期：官方按钮重挂（旧节点 `isConnected=false`）后能按文本重新找到当前按钮继续；不重复点击、不 double 加载、无 slot error。
+- M 层锚点：`test/autoload.test.mjs`「按钮被重挂后必须改点新按钮」；标签识别由「只允许点击『加载更早』按钮」守住。
 
 ### T-D3 停止条件（M + B ✅）
 - 预期满足其一即停：被监视栏不再是文档中第一个 `.dsh-turnfold[data-seg-key]`，或其步骤数不再增长（S2 读投影模型）；一页可补完则只加载一页。
+- M 层锚点：`test/autoload.test.mjs` 的 S1 / S2 两条独立用例（各自单独失效即失败）。
 
 ## E 流式与视口
 
@@ -114,11 +120,12 @@
 
 ### T-E3 ThinkBox 首次出现视口贴底
 - 视口位于底部时，等待新思维链 ThinkBox 首次出现。
-- 预期：视口保持贴底，无需手动滚动恢复跟随；用户主动上滚不被强制拉回。（⬜ 待执行；滚动容器检测已改为 `[data-chat-flow]` 锚点向上遍历，实测解析到官方滚动容器）
+- 预期：视口保持贴底，无需手动滚动恢复跟随；用户主动上滚不被强制拉回。
+- 现状：滚动容器解析与 `[data-chat-flow]` 锚点形状已由本 lane 断言（⬜ 视口跟随本体待执行——需要实时流式产生新 ThinkBox = 计费交互，登记为 LIMITATION）。
 
 ## F 配置兼容
 
-### T-F1 设置标签页与配置入口
+### T-F1 设置标签页与配置入口（M + B ✅）
 - 打开设置：导航栏出现独立标签页「对话折叠」（与 通用设置 / 模型 / 插件 同级，
   `settings.section`）；通用设置的「对话显示」行仍只有 Normal / Compact / 折叠
   三项下拉（第三项名为 `Fold`）。
@@ -127,18 +134,18 @@
   `~/.dsh/settings.yaml` 出现 `dsh-conversation-folding:` 命名空间
   （`displayMode` / `auxVisible` 与开关一致）；浏览器 localStorage 无本插件任何
   配置键；配置读写走本插件自有路由 `GET/POST /conversation-folding/config`
-  （host 经 settings 服务落盘），不存在任何 profile 配置入口。（⬜ 待执行）
+  （host 经 settings 服务落盘），不存在任何 profile 配置入口。（M + B ✅；「重启 dsh web 后保持」由 scratch home 重建 + `settings.yaml` 播种间接覆盖，见 tests/e2e/README.md）
 
-### T-F2 按类型折叠开关（M ✅，B ⬜ 待执行）
+### T-F2 按类型折叠开关（M + B ✅）
 - 分别开关各类型（机械化用例：model.test.mjs「F2」系列 + §1 匹配表用例）。
 - 预期：开关 = 是否折叠（开 = 折叠进栏、收起隐藏；关 = 始终显示）；默认豁免
   context / skill / system-prompt；工具名经匹配表精确匹配（pwsh→bash、
   str_replace_editor→edit、todo_write→todo、ask_user_question→ask，大小写归一）；
   未列入匹配表的工具类型（如 grep、subagent）始终折叠。
 
-### T-F3 非 fold 显示模式隔离
+### T-F3 非 fold 显示模式隔离（M + B ✅）
 - 在 Normal / Compact 下检查。
-- 预期：无 `:root[data-dsh-fold-mode=all]` 规则生效、无 `.dsh-turnfold`、无 slot error，官方 turn-process 按官方行为显示。（⬜ 待执行）
+- 预期：无 `:root[data-dsh-fold-mode=all]` 规则生效、无 `.dsh-turnfold`、无 slot error，官方 turn-process 按官方行为显示。
 
 ## G 插入与轮边界
 
@@ -153,10 +160,47 @@
 
 ---
 
+## 变异验证（用例强度证据，2026-09-09 ~ 09-10）
+
+铁律：每个变异「只改源码必要一处 → 跑对应用例 → 立即 `git checkout -- <被改文件>`
+还原 → 核对 `git status --short` 干净」。**还原按文件进行**，不整目录回滚——同目录
+其它未提交改动被连带回滚时，用例失败会从「断言命中」污染成「观测面缺失」。
+
+### M 层（26 个变异，协议 `npm test`）：26/26 被捕获
+
+| 变异点 | 变异 | 防住的用例 |
+|---|---|---|
+| `client/autoload.ts` ×6 | S1 比较符翻转 / S2 差一翻转 / 无数据哨兵 `-1`→`0` / LIMIT `500`→`0` / 重挂守卫删除 / 按钮标签匹配翻转 | `test/autoload.test.mjs`（本轮新增 5 例） |
+| `client/state.ts` 段展开 store ×2 | 拷贝语义破坏 / 未点击段默认展开 | `test/view-seat.test.mjs`（本轮新增） |
+| `client/state.ts` 配置与匹配表 ×3 | `ok:false` 守卫删除 / 匹配表大小写归一删除 / fold 属性值写错 | `test/state-config.test.mjs`、`test/model.test.mjs` |
+| `client/projection.ts` 缓存 ×2 | segVersion / configVersion 失效键弱化 | `test/view-seat.test.mjs`（本轮新增 3 例） |
+| `client/projection.ts` 锚定/隐藏/F4 ×4 | bodyAnchor 兜底翻转 / 隐藏规则发射条件翻转 / think 豁免条件删除 / F4 预览判断翻转 | `test/projection-edge.test.mjs`、`test/model.test.mjs`、`test/view-seat.test.mjs` |
+| `client/model.ts` ×2 | segKey 派生 endType 翻转 / 工具名回退链破坏 | 上述三文件（分别 31 / 1 例失败） |
+| `client/views.ts` ×3 | 栏计数 +1 / `data-seg-key` 写错 / 思维链联动方向反转 | `test/view-seat.test.mjs` |
+| `index.ts` host 路由 ×3 | 失败分支改 200 / displayMode 非法值兜底删除 / 畸形 JSON 改 500 | `test/host-route.test.mjs`（本轮新增 5 例） |
+| `client/main.ts` ×1 | 座位 priority `-1`→`0` | `test/plugin.test.mjs`（bundle 正则） |
+
+### B 层（4 个变异，协议 `npm run test:e2e -- --grep <条目>`）
+
+| 变异 | 结果 |
+|---|---|
+| B1 = M1（autoload S1 比较符翻转） | 浏览器 lane **未捕获**：正常态/变异态都只观测到 1 次点击——fixture 的被监视段一页即补完，用户那次点击自身已满足 S1。循环内部强度由 M 层承担；本 lane 保留端到端断言（不拉到顶、确实前插历史、可见 tool-call 为 0）。 |
+| B2 = M11（fold 属性值写错） | ✅ 捕获：T-A2 失败（Fold 下 `data-dsh-fold-mode` 应为 `all` 实为 `none`）。该分支 Node 侧无 DOM，由本 lane 补防。 |
+| B3 = M20（栏计数 +1） | ✅ 捕获：T-B2 的交叉断言失败（栏文案工具数 ≠ 段区内 `display:none` 的真实 tool-call 节点数）；只判文案格式的正则防不住数值差一。 |
+| B4 = M17（F4 预览判断翻转） | 浏览器 lane **无观测面**：归档会话在宿主投影中均已闭合（`turn-tail` 出现），静态 fixture 复现不出「轮未闭合的开放段」。由 M 层 M17（`model.test.mjs` R2/R5 + `projection-edge.test.mjs` T-E1）捕获。 |
+
+结论：M 层保证规则与循环内部强度，B 层保证真实生效面（模式属性、栏文案与真实
+节点的对账、补页端到端行为）。两处浏览器不可观测面（B1/B4）显式登记为 M 层
+职责，不以放松断言掩盖。
+
+---
+
 ## 缺陷对照
 
 状态：✅ 回归通过（标注验证层）；⬜ 无执行记录，待执行。
-（2026-09-07 架构重构后全量执行；执行环境：dsh web 0.1.2-rc.1 + Chrome。）
+（2026-09-07 架构重构后全量执行；执行环境：dsh web 0.1.2-rc.1 + Chrome。
+2026-09-10 复跑全绿：M 层 `npm test` 86/86，B 层 `npm run test:e2e` 16/16
+（自包含 lane：scratch DSH_HOME + 仓库内 fixture + 无头 Chrome）。）
 
 | 缺陷 | 条目 | 验证层 | 状态 |
 |---|---|---|---|

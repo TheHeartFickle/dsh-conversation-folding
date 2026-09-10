@@ -23,7 +23,10 @@
     "pretest": "npm run build",
     "test": "node --test \"test/**/*.test.mjs\"",
     "prepublishOnly": "npm run typecheck && npm test",
-    "package:registry": "node scripts/package-registry.mjs"
+    "package:registry": "node scripts/package-registry.mjs",
+    "pretest:e2e": "npm run pack:e2e",
+    "test:e2e": "bash scripts/e2e-mount.sh",
+    "pack:e2e": "npm run build && npm pack --silent"
   },
   "dsh": {
     "bundle": {
@@ -58,6 +61,7 @@
   ],
   "devDependencies": {
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.2-rc.1",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^26.5.0",
     "@types/react": "~18.3.1",
     "esbuild": "^0.28.2",

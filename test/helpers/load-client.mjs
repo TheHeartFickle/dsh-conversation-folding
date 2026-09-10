@@ -4,7 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-const primitivesStub = {
+export const primitivesStub = {
   MarkdownText: function MarkdownText() { return null; },
   JsonBlock: function JsonBlock() { return null; },
   DisclosureRow: function DisclosureRow() { return null; },
@@ -13,13 +13,15 @@ const primitivesStub = {
   Menu: function Menu() { return null; },
 };
 
-export async function loadClient() {
+export async function loadClient(opts = {}) {
   const source = await readFile(fileURLToPath(new URL('../../lib/client.js', import.meta.url)), 'utf8');
   const definitions = [];
   const sandboxWindow = { __ModuleLoader__: { load(definition) { definitions.push(definition); } } };
   const requireStub = (name) => {
-    if (name === 'react') return {};
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitivesStub;
+    // opts.react：服务端渲染座位组件时传入「真 React + useSyncExternalStore 收窄」
+    // 的门面（见 view-seat.test.mjs）；缺省保持桩对象（纯模型测试零 React 依赖）。
+    if (name === 'react') return opts.react ?? {};
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return opts.primitives ?? primitivesStub;
     throw new Error(`load-client: unexpected require(${name})`);
   };
   // new Function 在当前 realm 编译：避免 vm.runInNewContext 产生异 realm 数组，

@@ -23,12 +23,12 @@
 import React from "react";
 import { CSS } from "./styles.js";
 import { isFoldActive, loadConfig, syncFoldModeAttr } from "./state.js";
-import { AssistantNodeView, TurnProcessFoldView, type AssistantNodeViewProps, type TurnProcessFoldViewProps } from "./views.js";
-import { FoldingSettingsSection, TranscriptViewRowFold, type TranscriptViewRowFoldProps } from "./settings-ui.js";
+import { AssistantNodeView, TurnProcessFoldView } from "./views.js";
+import { FoldingSettingsSection, TranscriptViewRowFold } from "./settings-ui.js";
 import { autoLoadEffect } from "./autoload.js";
 import { AUX_TYPES, DEFAULT_AUX_VISIBLE, auxKeyOfNode, getAuxVisible, getTranscriptMode, setAuxVisible, toggleAux } from "./state.js";
 import { buildTimeline, classifyNode } from "./model.js";
-import { projectView } from "./projection.js";
+import { getProjection, projectView } from "./projection.js";
 
 // 宿主 slots 服务（client 端注入契约的最小读取面）。
 interface SlotRegistry {
@@ -50,6 +50,13 @@ export function apply(ctx: ClientContext): void {
 
 	loadConfig();
 
+	// 座位注册收口：inject + register 同构；组件必须经 createElement 包装
+	//（hooks 语义要求，register 的 component 会被宿主当普通函数调用）。
+	const registry = slots;
+	function registerSeat(slot: string, meta: Record<string, unknown>, view: (props: any) => React.ReactNode): void {
+		registry.inject(slot, () => registry.register({ name: slot, ...meta }, (props: any) => React.createElement(view, props)));
+	}
+
 	ctx.effect(() => {
 		if (typeof document === "undefined") return;
 		const tagId = "dsh-conversation-folding/styles";
@@ -64,42 +71,17 @@ export function apply(ctx: ClientContext): void {
 	});
 
 	// 影子官方“对话显示”设置行，新增第三项「Fold」；官方 normal/compact 保持原样。
-	slots.inject("settings.general.item", () => {
-		return slots.register(
-			{ name: "settings.general.item", id: "transcript-view", order: 12, priority: -1, locale: "chat" },
-			(props: TranscriptViewRowFoldProps) => React.createElement(TranscriptViewRowFold, props)
-		);
-	});
+	registerSeat("settings.general.item", { id: "transcript-view", order: 12, priority: -1, locale: "chat" }, TranscriptViewRowFold);
 
 	// 独立设置标签页「对话折叠」（settings.section：与 通用设置 / 模型 /
 	// 插件 同级，每项注册 = 导航栏一页）。order 100 追加在原生页之后。
-	slots.inject("settings.section", () => {
-		return slots.register(
-			{
-				name: "settings.section",
-				id: "conversation-folding",
-				order: 100,
-				label: () => "对话折叠"
-			},
-			() => React.createElement(FoldingSettingsSection)
-		);
-	});
+	registerSeat("settings.section", { id: "conversation-folding", order: 100, label: () => "对话折叠" }, FoldingSettingsSection);
 
 	// 影子 assistant-step 与 turn-process（0.1.2 slots 选举制：同 key 必须显式
 	// 更低 priority，低者渲染，见 BUGS.md B3）。tool-call / context 交给官方
 	// 渲染，显隐由投影生成的动态 CSS 控制（projection.ts F2/F3/F4）。
-	slots.inject("conversation.chat.node", () => {
-		return slots.register(
-			{ name: "conversation.chat.node", key: "assistant-step", locale: "conversation", priority: -1 },
-			(props: AssistantNodeViewProps) => React.createElement(AssistantNodeView, props)
-		);
-	});
-	slots.inject("conversation.chat.node", () => {
-		return slots.register(
-			{ name: "conversation.chat.node", key: "turn-process", locale: "conversation", priority: -1 },
-			(props: TurnProcessFoldViewProps) => React.createElement(TurnProcessFoldView, props)
-		);
-	});
+	registerSeat("conversation.chat.node", { key: "assistant-step", locale: "conversation", priority: -1 }, AssistantNodeView);
+	registerSeat("conversation.chat.node", { key: "turn-process", locale: "conversation", priority: -1 }, TurnProcessFoldView);
 
 	// 「加载更早」一次点击补点（autoload.ts）。
 	ctx.effect(autoLoadEffect);
@@ -108,10 +90,15 @@ export function apply(ctx: ClientContext): void {
 }
 
 // 测试缝（供 Node 单测加载真实 bundle 后驱动纯模型/投影；生产零依赖）。
+// getProjection/autoLoadEffect 是补点行为的观测面：Node 侧用 DOM 桩驱动
+// autoload.ts 的补点循环（浏览器 lane 的 fixture 一页即补完被监视段，
+// 只能观测 0/1 次点击，覆盖不到循环内部 —— 见 test/autoload.test.mjs）。
 export const __test = {
 	classifyNode: classifyNode,
 	buildTimeline: buildTimeline,
 	projectView: projectView,
+	getProjection: getProjection,
+	autoLoadEffect: autoLoadEffect,
 	auxKeyOfNode: auxKeyOfNode,
 	auxTypes: AUX_TYPES,
 	defaultAuxVisible: DEFAULT_AUX_VISIBLE,

@@ -20,23 +20,16 @@ let autoLoadTimer: ReturnType<typeof setTimeout> | null = null;
 const AUTOLOAD_LIMIT = 500;
 const AUTOLOAD_TICK_MS = 120;
 
-function findLoadOlderBtn(): HTMLButtonElement | null {
-	if (typeof document === "undefined") return null;
-	const buttons = document.querySelectorAll<HTMLButtonElement>("button");
-	for (const button of buttons) {
-		const text = (button.textContent || "").trim();
-		if (text === "加载更早" || text === "Load earlier") return button;
-	}
-	return null;
-}
+// 翻页按钮按官方文案识别（启用=「加载更早」，禁用=加载中）。
+const LOAD_OLDER_LABELS = ["加载更早", "Load earlier"];
+const LOADING_LABELS = ["加载中…", "Loading…", "Loading..."];
 
-function findLoadingOlderBtn(): HTMLButtonElement | null {
+function findBtn(labels: string[], disabled: boolean): HTMLButtonElement | null {
 	if (typeof document === "undefined") return null;
-	const buttons = document.querySelectorAll<HTMLButtonElement>("button");
-	for (const button of buttons) {
-		if (!button.disabled) continue;
+	for (const button of document.querySelectorAll<HTMLButtonElement>("button")) {
+		if (button.disabled !== disabled) continue;
 		const text = (button.textContent || "").trim();
-		if (text === "加载中…" || text === "Loading…" || text === "Loading...") return button;
+		if (labels.includes(text)) return button;
 	}
 	return null;
 }
@@ -60,9 +53,7 @@ function stopAutoLoad(): void {
 
 function watchedFoldCount(): number {
 	if (autoLoad.watchSeg === null) return -1;
-	const proj = getLatestProjection();
-	if (proj === null) return -1;
-	const seg = proj.timeline.segByKey[autoLoad.watchSeg];
+	const seg = getLatestProjection()?.timeline.segByKey[autoLoad.watchSeg];
 	return seg ? seg.steps : -1;
 }
 
@@ -72,12 +63,12 @@ function autoLoadOlderTick(): void {
 	// React 翻页后会重挂“加载更早”按钮；旧节点断连时按当前文本重新找，
 	// 否则只点一次就停止（用户看到的“点一次仍加载不完”）。
 	if (!btn || !btn.isConnected) {
-		btn = findLoadOlderBtn();
+		btn = findBtn(LOAD_OLDER_LABELS, false);
 		autoLoad.btn = btn;
 	}
 	if (!btn) {
 		// 可能正处于“加载中…”状态：找到加载中的按钮就继续等，别过早停。
-		if (findLoadingOlderBtn() !== null) {
+		if (findBtn(LOADING_LABELS, true) !== null) {
 			scheduleAutoLoad();
 			return;
 		}
@@ -122,20 +113,16 @@ export function autoLoadEffect(): (() => void) | undefined {
 		const btn = (target as HTMLElement).closest("button");
 		if (!btn || btn.disabled) return;
 		const text = (btn.textContent || "").trim();
-		if (text !== "加载更早" && text !== "Load earlier") return;
+		if (!LOAD_OLDER_LABELS.includes(text)) return;
 		if (autoLoad.active) return;
 		autoLoad.active = true;
 		autoLoad.clicks = 0;
 		autoLoad.btn = btn;
 		// 记录点击时最旧的折叠栏（segKey 稳定，跨翻页不漂移），用它判断
-		// “步骤是否已全部加载”。
+		// “步骤是否已全部加载”；投影不可用时从 0 起步（补一页即可见进展）。
 		const firstBar = document.querySelector(".dsh-turnfold[data-seg-key]");
 		autoLoad.watchSeg = firstBar ? firstBar.getAttribute("data-seg-key") : null;
-		const proj = getLatestProjection();
-		autoLoad.watchCount = proj !== null && autoLoad.watchSeg !== null
-			? watchedFoldCount()
-			: -1;
-		if (autoLoad.watchCount < 0) autoLoad.watchCount = 0;
+		autoLoad.watchCount = Math.max(0, watchedFoldCount());
 		scheduleAutoLoad();
 	}
 	document.addEventListener("click", onClick, true);

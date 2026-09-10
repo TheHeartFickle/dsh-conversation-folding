@@ -30,19 +30,21 @@ function project(nodes, ui = {}) {
 }
 
 function viewOf(proj, key) { return proj.views.get(key); }
+// Timeline 不再暴露 turnByKey（投影按 turns 遍历）；测试按 turn 号取轮模型。
+function turnModel(proj, turn = 1) { return proj.timeline.turns.find((m) => m.turn === turn); }
 
 test('R2/R5 流式开放轮：尾段 open，收起仅保留最近一条预览（F4）', () => {
   resetSeq();
   const nodes = [user('u1', 1), toolCall('t1', 1), step('s1', 1, REASONING), toolCall('t2', 1)];
   const proj = project(nodes);
-  const model = proj.timeline.turnByKey[1];
+  const model = turnModel(proj);
   assert.equal(model.closed, false);
   assert.equal(model.segments.length, 1);
   assert.equal(model.segments[0].endType, 'open');
   assert.equal(model.segments[0].segKey, 't1:open');
-  assert.equal(viewOf(proj, 't1').state, 'hidden');
-  assert.equal(viewOf(proj, 't2').state, 'preview');
-  assert.equal(viewOf(proj, 's1').state, 'hidden');
+  assert.equal(viewOf(proj, 't1').visible, false);
+  assert.equal(viewOf(proj, 't2').visible, true);
+  assert.equal(viewOf(proj, 's1').visible, false);
   // 预览键不进隐藏样式
   assert.ok(!proj.styleText.includes('"t2"'));
   assert.ok(proj.styleText.includes('"t1"'));
@@ -52,12 +54,12 @@ test('R3 中止轮（B10 收起方向 F3）：闭合后尾段全部隐藏、无�
   resetSeq();
   const nodes = [user('u1', 1), toolCall('t1', 1), step('s1', 1, REASONING), turnTail('tt1', 1)];
   const proj = project(nodes);
-  const model = proj.timeline.turnByKey[1];
+  const model = turnModel(proj);
   assert.equal(model.closed, true, 'turn-tail 即闭合，不要求 closing 正文');
   const seg = model.segments[0];
   assert.equal(seg.endType, 'open');
-  assert.equal(viewOf(proj, 't1').state, 'hidden');
-  assert.equal(viewOf(proj, 's1').state, 'hidden');
+  assert.equal(viewOf(proj, 't1').visible, false);
+  assert.equal(viewOf(proj, 's1').visible, false);
   assert.ok(proj.styleText.includes('"t1"'), '失败 tool-call 必须进隐藏样式');
 });
 
@@ -66,8 +68,8 @@ test('B10 展开方向 F5：中止轮展开后全部步骤可见', () => {
   const nodes = [user('u1', 1), toolCall('t1', 1), step('s1', 1, REASONING), turnTail('tt1', 1)];
   const segKey = 't1:open';
   const proj = project(nodes, { expanded: (key) => key === segKey });
-  assert.equal(viewOf(proj, 't1').state, 'visible');
-  assert.equal(viewOf(proj, 's1').state, 'visible');
+  assert.equal(viewOf(proj, 't1').visible, true);
+  assert.equal(viewOf(proj, 's1').visible, true);
   assert.equal(proj.styleText, '', '展开段不得生成任何隐藏规则');
 });
 
@@ -84,7 +86,7 @@ test('I1/R2 Ctrl+Enter steering 边界开启新段（T-G1）：插入点前后�
     turnTail('tt1', 1),
   ];
   const proj = project(nodes);
-  const segs = proj.timeline.turnByKey[1].segments;
+  const segs = turnModel(proj).segments;
   assert.equal(segs.length, 2, 'steering 封口前段并开启新段');
   assert.equal(segs[0].segKey, 'steer1');
   assert.deepEqual(segs[0].keys, ['t1', 's1']);
@@ -96,8 +98,8 @@ test('I1/R2 Ctrl+Enter steering 边界开启新段（T-G1）：插入点前后�
     { segKey: 't1:open', toolCalls: 1, messages: 0, pos: 'before' },
   ]);
   // 收起态：两段各自隐藏，互不预览（轮已闭合）
-  assert.equal(viewOf(proj, 't1').state, 'hidden');
-  assert.equal(viewOf(proj, 't2').state, 'hidden');
+  assert.equal(viewOf(proj, 't1').visible, false);
+  assert.equal(viewOf(proj, 't2').visible, false);
 });
 
 test('B2/B16 栏锚定段首：展开步骤在栏下方（官方一致），收起紧贴其后正文（T-B4/T-C2）', () => {
@@ -112,10 +114,10 @@ test('B2/B16 栏锚定段首：展开步骤在栏下方（官方一致），收�
     turnTail('tt1', 1),
   ];
   const proj = project(nodes);
-  const segs = proj.timeline.turnByKey[1].segments;
+  const segs = turnModel(proj).segments;
   assert.deepEqual(segs.map((s) => s.segKey), ['b1', 'b2']);
   assert.equal(segs[0].toolCalls, 1);
-  assert.equal(segs[0].messages, 1);
+  // Segment.messages 已删（恒等于 endType === 'body' ? 1 : 0，由下方 FoldBar 断言覆盖）
   assert.equal(segs[1].toolCalls, 1);
   // 轮首段（段前是 user 边界）→ 锚点=轮 turn-process（收起时紧贴其后正文 b1）
   assert.deepEqual(proj.barsByAnchor.get('tp1'), [{ segKey: 'b1', toolCalls: 1, messages: 1, pos: 'before' }]);
@@ -243,12 +245,12 @@ test('F2 think 开关：仅推理过程步可设为不折叠（M）', () => {
   resetSeq();
   const nodes = [user('u1', 1), toolCall('t1', 1), step('s1', 1, REASONING), turnTail('tt1', 1)];
   const folded = project(nodes);
-  assert.equal(viewOf(folded, 's1').state, 'hidden', '默认 think 折叠');
+  assert.equal(viewOf(folded, 's1').visible, false, '默认 think 折叠');
   const unfolded = project(nodes, { expanded: (key) => key === 't1:open' || key === undefined });
-  assert.equal(viewOf(unfolded, 's1').state, 'visible');
+  assert.equal(viewOf(unfolded, 's1').visible, true);
   // think 不折叠：收起的段内思维链保持显示
   const exempt = project(nodes, { auxVisible: (key) => key === 'think' });
-  assert.equal(viewOf(exempt, 's1').state, 'visible', '豁免 think 后过程步恒显示');
+  assert.equal(viewOf(exempt, 's1').visible, true, '豁免 think 后过程步恒显示');
   assert.ok(proj_text_has_key(exempt, 't1'), '普通 tool-call 仍折叠');
 });
 
@@ -259,7 +261,7 @@ test('F2 system-prompt（系统提示词）与 context 同路径折叠（M）', 
   assert.equal(client.__test.classifyNode(sysPrompt), 'aux', 'system-prompt 归为辅助项，与 context 同路径');
   const timeline = buildTimeline(nodes.map((n) => n.key), makeStore(nodes));
   assert.equal(timeline.segByKey['t1:open'].steps, 1);
-  assert.ok('sp1' in timeline.owner, 'system-prompt 进段参与折叠豁免');
+  assert.ok(timeline.segByKey.u1.keys.includes('sp1'), 'system-prompt 进段参与折叠豁免');
   // 未豁免 → 进隐藏样式（按节点 key，同 context 机制）；豁免 → 无规则
   const folded = projectView(timeline, { active: true, auxVisible: () => false, isExpanded: () => false });
   assert.ok(proj_text_has_key(folded, 'sp1'), '系统提示词默认豁免被关闭时按节点 key 折叠');
@@ -285,10 +287,10 @@ test('R4 空段不落账 + 空载步恒隐藏', () => {
   const emptyStep = step('s0', 1, [{ kind: 'tool-call' }]);
   const nodes = [user('u1', 1), emptyStep, step('b1', 1, TEXT_ONLY), turnTail('tt1', 1)];
   const proj = project(nodes);
-  assert.deepEqual(proj.timeline.turnByKey[1].segments.map((s) => s.segKey), ['b1'], '纯空载步不生成段');
-  assert.equal(viewOf(proj, 's0').state, 'hidden');
+  assert.deepEqual(turnModel(proj).segments.map((s) => s.segKey), ['b1'], '纯空载步不生成段');
+  assert.equal(viewOf(proj, 's0').visible, false);
   const expanded = project(nodes, { expanded: () => true });
-  assert.equal(viewOf(expanded, 's0').state, 'hidden', '空载步展开也不显示');
+  assert.equal(viewOf(expanded, 's0').visible, false, '空载步展开也不显示');
 });
 
 test('非 active 投影不产生视图与样式（官方模式零介入）', () => {
@@ -316,7 +318,7 @@ test('B2 steering 封口段：锚点=前一个正文下方（pos=after，紧贴 
     turnTail('tt1', 1),
   ];
   const proj = project(nodes);
-  const segs = proj.timeline.turnByKey[1].segments;
+  const segs = turnModel(proj).segments;
   assert.equal(segs[0].endType, 'boundary');
   assert.equal(segs[0].prevBody, 'b1', '模型记录段前最后一个正文');
   assert.deepEqual(proj.barsByAnchor.get('b1'), [{ segKey: 'steer1', toolCalls: 1, messages: 0, pos: 'after' }]);
