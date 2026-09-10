@@ -33,3 +33,8 @@ registry/
 .work-process
 # Build output (generated from src/ by scripts/build.mjs)
 lib/
+
+# e2e lane tarball (produced by npm pack)
+the-heart-fickle-dsh-conversation-folding-*.tgz
+test-results/
+playwright-report/

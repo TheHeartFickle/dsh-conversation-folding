@@ -1,4 +1,9 @@
-# B 层浏览器回归脚本（browser-harness）
+# B 层浏览器脚本（browser-harness，本机工具）
+
+> 回归入口已迁移到 `npm run test:e2e`（自包含无头 Playwright lane：scratch
+> `DSH_HOME` + 仓库内确定性 fixture，见 `tests/e2e/README.md`）。本目录脚本
+> 保留作为**本机 browser-harness 实测工具**（需要一台已装好插件的活实例），
+> 不再是回归入口；二者的断言同源，Python 侧已同步变异轮强化。
 
 对应 `docs/REGRESSION.md` 的 B 层条目。每个脚本自包含，可直接执行：
 
@@ -6,8 +11,11 @@
 browser-harness < test/browser/T-A2.py
 ```
 
-- 目标实例与 token：见仓库根 `.dsh-test-env.md`（token 每次重启 dsh web 后轮换，
-  从 `.dsh-web.out.log` 重新读取；脚本顶部的 `TOKEN` 需同步更新）。
+- 目标实例 URL（含 token）：脚本按顺序读取 ① 环境变量 `DSH_TEST_URL`，
+  ② 仓库根 `.dsh-test-env.md`（**本机临时文件，不入库**）中的
+  `http://127.0.0.1:3178/?token=…`。token 每次重启 dsh web 后轮换（从
+  `.dsh-web.out.log` 重新读取并更新 `.dsh-test-env.md`，或在命令行注入环境
+  变量），脚本内不出现具体 token。
 - **硬约束**：所有脚本只做只读交互（导航、打开会话、翻历史、展开/收起折叠栏、
   切换显示模式、设置页开关、DOM/computedStyle/localStorage 读取）。
   禁止发送消息、Ctrl+Enter 插入、重试/重新生成、新建会话——零 LLM 计费。
@@ -15,6 +23,9 @@ browser-harness < test/browser/T-A2.py
   无 `data-dsh-debug-error` / `window.__DF_*`。
 - 脚本编码：browser-harness 经 stdin 读脚本，Windows 下非 ASCII 会变成
   surrogate 崩溃；因此脚本正文与注释全部 ASCII，中文字面量用 `\uXXXX` 转义。
+- 时序余量（2026-09-09 按实测放宽）：`goto_root` 后 6s、打开会话后 8-10s、
+  模式切换后 6s、展开/收起后 1.5s；实例慢或 fixture 变大时优先放大 sleep，
+  不要放松断言。
 
 ## 已验证的调用方式（2026-09-09 实测）
 
@@ -50,7 +61,7 @@ browser-harness < test/browser/T-A2.py
 |---|---|---|---|
 | T-A2.py | T-A2 | ✅ 已跑通 | Normal/Compact 零介入、Fold 出栏；模式经 reload 持久化；结束恢复 Compact+Fold |
 | T-B1.py | T-B1 | ✅ 已跑通 | 33px/细底边/透明背景/chevron -90°↔0°（读值时须禁用 transition，见下） |
-| T-B2.py | T-B2 | ✅ 已跑通 | 34 栏文案全部命中四种官方格式（mixed 20/tools 6/msgs 8/thought 0）；展开收起文案不变 |
+| T-B2.py | T-B2 | ✅ 已跑通（2026-09-09 变异轮强化） | 34 栏文案命中四种官方格式 + **M20 交叉断言**：收起态每栏文案工具数 == 段区内 display:none 的真实 tool-call 节点数（区域=本栏到下一插件栏，同 parentElement 多栏锚跳过）；展开收起文案不变 |
 | T-B3.py | T-B3 | ✅ 已跑通 | 收起栏均紧贴其后内容（无轮顶堆叠）；展开步骤在栏下方 |
 | T-B4.py | T-B4 | ✅ 已跑通 | 多段独立展开、互不影响、重渲染保持（跨 reload 不保持属预期：segStore 为内存态） |
 | T-B5.py | T-B5 | ✅ 已跑通 | 48 个相邻可见条目间距恒 16px；0 渲染态隐藏座位 |
@@ -59,7 +70,7 @@ browser-harness < test/browser/T-A2.py
 | T-C3.py | T-C3 | ✅ 已跑通 | 中止轮 `t8:open`：收起 0 可见 → 展开 2 工具+1 思维链 → 再收起 0 |
 | T-C4.py | T-C4 | ✅ 已跑通 | 补页全程可见 tool-call 不超过豁免基线；动态规则存在；无 slot error |
 | T-C5.py | T-C5 | ✅ 已跑通 | 12 个可见正文含渲染 code 元素、0 debug error（围栏块随虚拟化滚出视口时以 `pre` 计数为准） |
-| T-D1.py | T-D1 / T-D2 | ✅ 已跑通（D2 部分） | 1 次真实点击 → 补点 4 次点击、firstBar segKey 前移（S1）、未拉到顶部；**D2 的重挂观测 remounts=0**（本次翻页未触发按钮重挂，重找路径未走到，属 PARTIAL） |
+| T-D1.py | T-D1 / T-D2 | ✅ 已跑通（2026-09-09 变异轮强化） | fixture 换静态多页会话（AutoTest_Dotnet）；**硬断言**：补点停止后 loadBtn 仍在（不拉到顶，防 M1/M2）、点击总数 ≤4、keys 增长、visibleTools==0、零 slot/debug error；D2 重挂观测 remounts 为参考值（本次未触发重挂，属 PARTIAL 信息） |
 | T-E1.py | T-E1 | ⚠️ 仅静态 | `LIMITATION:` 流式阶段断言需实时流式（计费），静态 unhide 规则已验 |
 | T-E2.py | T-E2 | ⚠️ 仅静态 | `LIMITATION:` 流式预览/收敛需实时流式（计费）；M 层 R2/R5/F4 覆盖 |
 | T-E3.py | T-E3 | ⚠️ 仅静态 | `LIMITATION:` 需实时思维链出现（计费）；已验 `[data-chat-flow]` 向上解析滚动容器成功 |

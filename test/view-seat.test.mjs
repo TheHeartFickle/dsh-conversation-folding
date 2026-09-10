@@ -14,6 +14,18 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { loadClient, makeNode, primitivesStub } from './helpers/load-client.mjs';
 
 const reactFacade = { ...React, useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot() };
+// 直调门面：座位组件作为普通函数调用（不进渲染器）——用于触发 bundle 内部
+// 的 setSegExpanded（Node 端唯一入口是 FoldButton 的 onClick 闭包）。
+// useEffect 置空（useFoldStyle 的样式写入不触发）；useSyncExternalStore 收窄
+// 为读快照；useMemo 直通（渲染器外真实 hooks 非法，直调路径只求值不求缓存）。
+// 门面仍展开真实 React：renderToStaticMarkup 下 useState 等其余真实 hooks
+// 合法，同一实例可兼用于直调与静态渲染。
+const clickFacade = {
+  ...React,
+  useEffect: () => { },
+  useMemo: (fn) => fn(),
+  useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
+};
 // Menu 桩渲染 anchor 与 items（{id,label}）：让「对话显示」下拉的三项选项
 // （normal/compact/fold）成为可断言标记（T-A1/T-A2 的机械化部分）。
 const primitivesWithMenu = {
@@ -33,8 +45,11 @@ test.afterEach(() => {
 
 // 载入 bundle 并捕获注册的座位组件。displayMode 经 GET /conversation-folding/config
 // 恢复（fetch 契约同 model.test.mjs：GET options===undefined）。
-async function bootSeats(config) {
-  const client = await loadClient({ react: reactFacade, primitives: primitivesWithMenu });
+// react 参数：缺省 reactFacade（渲染器内静态渲染）；传 clickFacade 可在渲染器
+// 外直调座位。每个用例独立 boot——bundle 内的三个 store 与 WeakMap 缓存是
+// 模块级单例，互不污染（同 state-config.test.mjs 的做法）。
+async function bootSeats(config, react = reactFacade) {
+  const client = await loadClient({ react, primitives: primitivesWithMenu });
   globalThis.fetch = (url, options) => {
     if (url === '/conversation-folding/config' && options === undefined) {
       return Promise.resolve({ ok: true, json: async () => ({ ok: true, ...(config ?? {}) }) });
@@ -214,4 +229,88 @@ test('T-A2 影子「对话显示」行：fold 模式下选择器显示 Fold', ()
   assert.ok(html.includes('dsh-tv-selector'), '选择器按钮渲染');
   assert.ok(html.includes('>Fold</button>'), '选中 fold 时按钮文案为 Fold');
   assert.ok(html.includes('对话显示'), '行标题为官方文案');
+});
+
+// ---------- M7/M12/M13 store 与 WeakMap 缓存（直调座位触发 setSegExpanded） ----------
+
+// 从座位返回的元素树里找折叠栏按钮。子组件链 ProcessFold → FoldButton →
+// 图标桩均无 hooks，可在渲染器外展开；onClick 内部调用 bundle 的
+// setSegExpanded（变异 M7 的拷贝语义 / M12 的缓存版本键都从这里触发）。
+// 注意：原始元素树不摊平嵌套数组（barElsOf 的返回值本身就是数组孩子）。
+function foldButtons(el, out = []) {
+  if (Array.isArray(el)) {
+    for (const kid of el) foldButtons(kid, out);
+    return out;
+  }
+  if (!el || typeof el !== 'object') return out;
+  if (typeof el.type === 'function') return foldButtons(el.type(el.props), out);
+  if (el.type === 'button' && typeof el.props.onClick === 'function' &&
+    String(el.props.className || '').includes('dsh-turnfold')) {
+    out.push(el);
+  }
+  const kids = el.props ? el.props.children : null;
+  if (Array.isArray(kids)) for (const kid of kids) foldButtons(kid, out);
+  else if (kids) foldButtons(kids, out);
+  return out;
+}
+
+function clickBar(seat, node, snap, segKey) {
+  const buttons = foldButtons(seat({ node, t, useChat: () => snap }));
+  const bar = buttons.find((b) => b.props['data-seg-key'] === segKey);
+  assert.ok(bar, '渲染出栏 ' + segKey + '（实际: ' + buttons.map((b) => b.props['data-seg-key']).join(',') + '）');
+  bar.props.onClick({});
+}
+
+test('M7 setSegExpanded 拷贝语义：连续展开三段，前两段展开状态保持', async () => {
+  const { turnProcessSeat, assistantSeat } = await bootSeats({ displayMode: 'fold', auxVisible: ['context', 'skill', 'system-prompt'] }, clickFacade);
+  const nodes = [user('u1', 1), turnProcess('tp1', 1), toolCall('t1', 1), step('b1', 1, TEXT_ONLY), toolCall('t2', 1), step('b2', 1, TEXT_ONLY), toolCall('t3', 1), step('b3', 1, TEXT_ONLY), turnTail('tt1', 1)];
+  const snap = snapshot(nodes);
+  // 三段的栏锚点各不相同（B2③ 轮顶座位 / B2② 前一正文下方），展开动作
+  // 分跨三个座位渲染面——更贴近真实点击路径。
+  const barSeat = { b1: turnProcessSeat, b2: assistantSeat, b3: assistantSeat };
+  const barNode = { b1: nodes[1], b2: nodes[3], b3: nodes[5] };
+  const assertOpen = (seg, open, message) => {
+    const html = renderSeat(barSeat[seg], { node: barNode[seg], t, useChat: () => snap });
+    if (open) assert.match(html, new RegExp('data-open="true" data-seg-key="' + seg + '"'), message);
+    else assert.match(html, new RegExp('data-seg-key="' + seg + '" aria-expanded="false"'), message);
+  };
+  for (const seg of ['b1', 'b2', 'b3']) assertOpen(seg, false, seg + ' 初始收起');
+  // 每次点击都取自最新一次直调渲染的元素树（onClick 闭包捕获当时的展开状态）。
+  for (const seg of ['b1', 'b2', 'b3']) clickBar(barSeat[seg], barNode[seg], snap, seg);
+  for (const seg of ['b1', 'b2', 'b3']) {
+    assertOpen(seg, true, seg + ' 仍展开——变异把 new Map(segStore.get()) 改成 new Map() 丢弃旧值时 b1/b2 在此失败');
+  }
+});
+
+test('M12 段展开版本使 WeakMap 缓存失效：展开后收起段的过程步可见', async () => {
+  const { turnProcessSeat, assistantSeat } = await bootSeats({ displayMode: 'fold', auxVisible: ['context', 'skill', 'system-prompt'] }, clickFacade);
+  const nodes = [user('u1', 1), turnProcess('tp1', 1), toolCall('t1', 1), step('s1', 1, REASONING), turnTail('tt1', 1)];
+  const snap = snapshot(nodes);
+  // ① 同一快照对象身份先投影一次（缓存 segVersion=0 的投影；中止轮尾段
+  //    segKey=t1:open，轮已闭合 → F3 无预览，思维链步隐藏）。
+  assert.ok(renderSeat(assistantSeat, { node: nodes[3], t, useChat: () => snap }).includes('data-dsh-hidden-turn'),
+    '收起的闭合尾段：思维链步渲染隐藏占位');
+  // ② 经栏点击触发 setSegExpanded → segStore version 递增（变异把缓存键
+  //    === 改 <= 时，这一步之后缓存不再失效）。
+  clickBar(turnProcessSeat, nodes[1], snap, 't1:open');
+  // ③ 同一快照对象身份再次投影：缓存键 segVersion 已变 → 必须基于同一
+  //    timeline 重建投影，内容反映新状态。
+  const html = renderSeat(assistantSeat, { node: nodes[3], t, useChat: () => snap });
+  assert.ok(!html.includes('data-dsh-hidden-turn'), '展开后隐藏标记消失（命中陈旧缓存时仍隐藏）');
+  assert.ok(html.includes('dsh-think'), '展开后思维链内容渲染（F5）');
+});
+
+test('M13 豁免表版本使 WeakMap 缓存失效：think 豁免后收起段内思维链可见', async () => {
+  const { client, assistantSeat } = await bootSeats({ displayMode: 'fold', auxVisible: ['context', 'skill', 'system-prompt'] }, clickFacade);
+  const nodes = [user('u1', 1), turnProcess('tp1', 1), step('s0', 1, REASONING), turnTail('tt1', 1)];
+  const snap = snapshot(nodes);
+  // ① 同一快照对象身份先投影一次（缓存 configVersion=0 的投影）。
+  assert.ok(renderSeat(assistantSeat, { node: nodes[2], t, useChat: () => snap }).includes('data-dsh-hidden-turn'),
+    'think 默认折叠：收起段内思维链隐藏');
+  // ② 豁免表变更 → auxStore version 递增（变异把缓存键 === 改 <= 时不失效）。
+  client.__test.setAuxVisible(['context', 'skill', 'system-prompt', 'think']);
+  // ③ 同一快照对象身份再次投影：必须重建并反映新豁免表（F2）。
+  const html = renderSeat(assistantSeat, { node: nodes[2], t, useChat: () => snap });
+  assert.ok(!html.includes('data-dsh-hidden-turn'), '缓存未失效时仍渲染隐藏占位');
+  assert.ok(html.includes('dsh-think'), 'think 豁免后收起段内思维链保持显示');
 });

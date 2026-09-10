@@ -105,3 +105,30 @@ test('T-F2 默认豁免对账：defaultAuxVisible 恰为 context/skill/system-pr
     }
   }
 });
+
+// M11：data-dsh-fold-mode 运行时写入在 Node 端无 DOM 时不可观测（ui-static
+// 只能 grep bundle 文本）。用最小 document 桩捕获 documentElement.dataset
+// 的写值序列；桩只实现 syncFoldModeAttr 触碰的读取面，用例结束恢复
+// globalThis（node --test 每文件独立进程，仍避免污染同文件其他用例）。
+test('T-A2/M11 data-dsh-fold-mode 运行时写入：初始 compact 写 none，GET 恢复 fold 写 all', async () => {
+  const writes = [];
+  const savedDocument = globalThis.document;
+  globalThis.document = {
+    documentElement: {
+      dataset: {
+        set dshFoldMode(value) { writes.push(value); },
+        get dshFoldMode() { return writes[writes.length - 1] ?? null; },
+      },
+    },
+  };
+  try {
+    const folded = await boot({ displayMode: 'fold', auxVisible: ['bash'] });
+    await tick();
+    assert.equal(folded.client.__test.getTranscriptMode(), 'fold');
+    assert.deepEqual(writes, ['none', 'all'],
+      'apply（默认 compact）写 none，GET 恢复 fold 后写 all——变异把 active 写成 "none" 时在此失败');
+  } finally {
+    if (savedDocument === undefined) delete globalThis.document;
+    else globalThis.document = savedDocument;
+  }
+});

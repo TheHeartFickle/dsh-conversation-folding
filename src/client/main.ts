@@ -28,7 +28,7 @@ import { FoldingSettingsSection, TranscriptViewRowFold } from "./settings-ui.js"
 import { autoLoadEffect } from "./autoload.js";
 import { AUX_TYPES, DEFAULT_AUX_VISIBLE, auxKeyOfNode, getAuxVisible, getTranscriptMode, setAuxVisible, toggleAux } from "./state.js";
 import { buildTimeline, classifyNode } from "./model.js";
-import { projectView } from "./projection.js";
+import { getProjection, projectView } from "./projection.js";
 
 // 宿主 slots 服务（client 端注入契约的最小读取面）。
 interface SlotRegistry {
@@ -90,10 +90,15 @@ export function apply(ctx: ClientContext): void {
 }
 
 // 测试缝（供 Node 单测加载真实 bundle 后驱动纯模型/投影；生产零依赖）。
+// getProjection/autoLoadEffect 是补点行为的观测面：Node 侧用 DOM 桩驱动
+// autoload.ts 的补点循环（浏览器 lane 的 fixture 一页即补完被监视段，
+// 只能观测 0/1 次点击，覆盖不到循环内部 —— 见 test/autoload.test.mjs）。
 export const __test = {
 	classifyNode: classifyNode,
 	buildTimeline: buildTimeline,
 	projectView: projectView,
+	getProjection: getProjection,
+	autoLoadEffect: autoLoadEffect,
 	auxKeyOfNode: auxKeyOfNode,
 	auxTypes: AUX_TYPES,
 	defaultAuxVisible: DEFAULT_AUX_VISIBLE,
