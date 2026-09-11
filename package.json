@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "prepare": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run build",
     "test": "node --test \"test/**/*.test.mjs\"",
