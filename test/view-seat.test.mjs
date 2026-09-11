@@ -124,6 +124,9 @@ test('T-B2 文案格式：2 个工具调用 · 1 条消息（工具段被正文�
   const html = renderSeat(fold.turnProcessSeat, { node: nodes[1], t, useChat: () => snap });
   assert.equal(labelOf(html), '2 个工具调用 · 1 条消息');
   assert.match(html, /data-seg-key="b1"/, '插件栏携带 segKey（补点 S1/S2 观测依赖）');
+  // B18：落位标记必须真的渲染——静态间距规则按 data-bar-pos 匹配，
+  // 该属性缺失时规则永不生效（正是「栏上方比下方紧」的根因）。
+  assert.match(html, /data-bar-pos="before"/, '轮首段落的兜底栏渲染 data-bar-pos=before（间距规则依赖）');
   assert.ok(!html.includes('data-dsh-debug-error'));
 });
 
@@ -271,8 +274,8 @@ test('M7 setSegExpanded 拷贝语义：连续展开三段，前两段展开状�
   const barNode = { b1: nodes[1], b2: nodes[3], b3: nodes[5] };
   const assertOpen = (seg, open, message) => {
     const html = renderSeat(barSeat[seg], { node: barNode[seg], t, useChat: () => snap });
-    if (open) assert.match(html, new RegExp('data-open="true" data-seg-key="' + seg + '"'), message);
-    else assert.match(html, new RegExp('data-seg-key="' + seg + '" aria-expanded="false"'), message);
+    if (open) assert.match(html, new RegExp('data-open="true"[^>]* data-seg-key="' + seg + '"'), message);
+    else assert.match(html, new RegExp('data-seg-key="' + seg + '"[^>]* aria-expanded="false"'), message);
   };
   for (const seg of ['b1', 'b2', 'b3']) assertOpen(seg, false, seg + ' 初始收起');
   // 每次点击都取自最新一次直调渲染的元素树（onClick 闭包捕获当时的展开状态）。

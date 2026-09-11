@@ -41,10 +41,15 @@ export const CSS = [
 	".dsh-turnfold-label{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:24px;overflow:hidden}",
 	".dsh-turnfold-chevron{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;margin-left:6px;transition:transform .1s;transform:rotate(-90deg)}",
 	".dsh-turnfold[data-open] .dsh-turnfold-chevron{transform:rotate(0)}",
-	// B2 栏锚定进座位后的间距：before 栏补上原先流程条目间距的下空隙，
-	// after 栏与上方正文拉开距离（兜底栏仍在独立条目内，不受影响）。
-	'[data-chat-flow-kind="assistant-step"] .dsh-turnfold[data-bar-pos="before"]{margin:0 0 8px}',
-	'[data-chat-flow-kind="assistant-step"] .dsh-turnfold[data-bar-pos="after"]{margin:12px 0 0}',
+	// B2 栏锚定进座位后的间距（B18：栏靠近它所折叠段的内容一侧，另一侧留 16px
+	// 座位流程间距——与官方 turn-process「控件紧贴其内容」同向。实测正文行基线到
+	// 栏标签基线：紧贴侧 9px、松侧 25px）：
+	// - before 栏落在正文上方（含轮首段落座 turn-process 座位的兜底栏）：外边距
+	//   归零，栏用自身 8px 下内边距紧贴其后正文，上方由座位 16px 流程间距隔开；
+	// - after 栏落在正文下方：补 16px 上外边距拉开与上方正文的距离，同样偏向
+	//   其所折叠段一侧。
+	'[data-chat-flow-kind="assistant-step"] .dsh-turnfold[data-bar-pos="before"],[data-chat-flow-kind="turn-process"] .dsh-turnfold[data-bar-pos="before"]{margin:0}',
+	'[data-chat-flow-kind="assistant-step"] .dsh-turnfold[data-bar-pos="after"]{margin:16px 0 0}',
 	// 折叠显示模式：折叠由插件接管。抵消官方 compact 视图对过程座位的隐藏
 	//（hidden="until-found" 走 content-visibility:hidden，需一并还原；
 	// 带插件隐藏标记的 assistant-step / turn-process 座位仍由上方 :has 规则隐藏）。

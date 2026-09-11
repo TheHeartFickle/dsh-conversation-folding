@@ -53,12 +53,13 @@ function HiddenTurnNode(): React.ReactElement {
 
 // 折叠按钮：官方 turn-process 控件样式的复刻，插件折叠栏与官方兜底栏
 // 共用外壳（segKey 仅插件栏携带，供「加载更早」补点按 data-seg-key 读取）。
-function FoldButton(props: { label: string; open: boolean; variant: string; segKey?: string; onClick: (event: React.MouseEvent<HTMLButtonElement>) => void }): React.ReactElement {
+function FoldButton(props: { label: string; open: boolean; variant: string; segKey?: string; pos?: BarPos; onClick: (event: React.MouseEvent<HTMLButtonElement>) => void }): React.ReactElement {
 	return React.createElement("button", {
 		type: "button",
 		className: "dsh-turnfold dsh-turnfold-" + props.variant,
 		"data-open": props.open || undefined,
 		"data-seg-key": props.segKey,
+		"data-bar-pos": props.pos,
 		"aria-expanded": props.open,
 		onClick: props.onClick
 	}, React.createElement("span", { className: "dsh-turnfold-label" }, props.label),
@@ -66,7 +67,8 @@ function FoldButton(props: { label: string; open: boolean; variant: string; segK
 }
 
 // 折叠栏（一段一栏）。文案为官方 turn-process 格式。pos 标记落位
-// （before=锚点内容上方 / after=下方），供座位内间距样式使用。
+// （before=锚点内容上方 / after=下方），渲染为 data-bar-pos 供静态样式
+// 声明落位间距（before / after 两种落位的正文↔栏间隙一致，见 styles.ts）。
 // 展开状态由父座位经 useProjection 订阅段展开 store，此处直接读即可。
 function ProcessFold(props: FoldBar): React.ReactElement {
 	const expanded = isSegExpanded(props.segKey);
@@ -78,6 +80,7 @@ function ProcessFold(props: FoldBar): React.ReactElement {
 		open: expanded,
 		variant: "process",
 		segKey: props.segKey,
+		pos: props.pos,
 		onClick: () => setSegExpanded(props.segKey, !expanded)
 	});
 }

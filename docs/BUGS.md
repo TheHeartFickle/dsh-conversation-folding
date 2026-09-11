@@ -113,11 +113,12 @@ Node 加载真实 bundle 驱动（test/model.test.mjs）。
   （⚠️ 本条修复时的锚点=段终点方案，其「展开步骤在栏上方」的取舍被 B16 推翻：
   锚点改为段首，展开方向与官方一致。）
 - **验证 `[browser]`**：新会话构造正文→工具→正文轮——两条栏分别落座两个
-  assistant-step 座位（`data-bar-pos=before`、栏-正文间隙 8px），turn-process
+  assistant-step 座位（`data-bar-pos` 落位标记），turn-process
   座位无栏；收起 tool-call 隐藏、展开可见，正文内思维链随其栏独立联动；
   流式首段栏兜底在 turn-process 座位（segKey `t<N>:open`），出正文后迁移到
   该正文座位（segKey 换边界键，S2 稳定性不受影响）；normal/compact 模式零
   介入；0 debug error。机械化：B2 锚定系列 4 用例（model.test.mjs）。
+  （栏落位间距最终为 `before` / `after` 对称 8px，见 B18。）
 
 ### B16 `[browser]` 展开折叠栏后步骤出现在栏上方（与官方显示相反）
 - **现象**：展开折叠栏时，栏只贴着其正文（段末），段内其他步骤出现在栏上方——
@@ -163,6 +164,27 @@ Node 加载真实 bundle 驱动（test/model.test.mjs）。
   正常，重载恢复 → 16px：间隔 ∝ 折叠步数实测成立，展开态行为无损。
   全会话扫描（9 栏原位 / 5 标记座位 / 间距最大 16px / 0 debug error）
   见 REGRESSION T-B5。
+
+### B18 `[browser]` 折叠栏上方比下方紧：栏与正文输出对不齐
+- **现象**：收起态折叠栏夹在上下两段正文之间时，栏到上方正文（上一轮/上一段
+  输出）的间隔比栏到下方正文小，栏看着更像黏在上方正文下面（2026-09-11
+  用户报告）。
+- **根因 `[code]`**：栏落座后依赖的 `data-bar-pos` 从未渲染——`FoldButton`
+  只写入 `data-seg-key`，`styles.ts` 里两条落位间距规则
+  （`[data-bar-pos="before"]` / `[data-bar-pos="after"]`）在选择器上永不匹配，
+  栏的实际外边距恒为 0。于是「栏↔正文」的间隙只剩座位 16px 流程间距与栏自身
+  的 8px 下内边距：before 栏（正文上方、含轮首段落座 turn-process 座位的兜底
+  栏）上方 16px、下方 16 + 8px，after 栏原本的 12px 上外边距也一并失效。
+- **修复**：`FoldButton` 渲染 `data-bar-pos`（`ProcessFold` 透传段的 `pos`），
+  落位规则改为**栏偏向其所折叠段的内容一侧、另一侧留 16px 座位流程间距**
+  （与官方 turn-process「控件紧贴其内容」同向）：before 栏 `margin:0`（栏用
+  自身 8px 下内边距紧贴其后正文）、after 栏 `margin:16px 0 0`（拉开与上方正文
+  的距离）；turn-process 座位的兜底栏也纳入 before 规则。规则文本由
+  `test/ui-static.test.mjs` 断言，栏属性由 `test/view-seat.test.mjs` 渲染断言。
+- **验证 `[browser]`**：fixture 会话（9 栏）收起态实测正文行基线到栏标签基线——
+  before 栏 上方 25px / 下方 9px，after 栏 上方 16px / 下方 25px（下方含下一
+  座位的 16px 流程间距）；两轮对照后用户选定「栏靠近下方正文」方向；展开态
+  栏位与步骤顺序不变；`npm test` 86 例 + B 层 16 例全绿。
 
 ### B12 `[browser]` 折叠栏位置在步骤下方，展开后步骤全在栏上方
 - **现象**：展开折叠栏后，该段的过程步骤出现在折叠栏上方，与官方 turn-process

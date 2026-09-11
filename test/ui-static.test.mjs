@@ -30,8 +30,15 @@ test('T-B5/B17 影子座位零残留：隐藏标记 display:none + :has 收座�
     bundle.includes('[data-chat-flow-kind="assistant-step"]:has([data-dsh-hidden-turn]){display:none}'),
     '含隐藏标记的 assistant-step 座位整个收掉（B17 幻影间隔根因）',
   );
-  assert.ok(bundle.includes('[data-chat-flow-kind="assistant-step"] .dsh-turnfold[data-bar-pos="before"]{margin:0 0 8px}'), 'before 栏补齐流程间距');
-  assert.ok(bundle.includes('[data-chat-flow-kind="assistant-step"] .dsh-turnfold[data-bar-pos="after"]{margin:12px 0 0}'), 'after 栏与上方正文拉开距离');
+  // 落位间距（B18）：栏偏向其所折叠段的内容一侧——before 栏外边距归零、用自身
+  // 8px 下内边距紧贴其后正文（含轮首段的兜底栏），after 栏补 16px 上外边距
+  // 拉开与上方正文的距离。
+  assert.ok(
+    bundle.includes('[data-chat-flow-kind="assistant-step"] .dsh-turnfold[data-bar-pos="before"],[data-chat-flow-kind="turn-process"] .dsh-turnfold[data-bar-pos="before"]{margin:0}'),
+    'before 栏外边距归零（含轮首段的兜底栏），紧贴其下方正文',
+  );
+  assert.ok(bundle.includes('[data-chat-flow-kind="assistant-step"] .dsh-turnfold[data-bar-pos="after"]{margin:16px 0 0}'), 'after 栏补 16px 上外边距，偏向其折叠段一侧');
+  assert.ok(bundle.includes('"data-bar-pos"'), '栏元素实际渲染 data-bar-pos（间距规则的选择器依赖它）');
 });
 
 test('T-E1/C4 动态隐藏规则选择器形状：模式属性 + 锚点 key + !important（后插入胜出）', () => {
